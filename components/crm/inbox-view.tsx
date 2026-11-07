@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Headphones, Mail, MessageSquareText, MoreHorizontal, Paperclip, PanelRightClose, PanelRightOpen, Phone, Plus, Search, Send, Sparkles, Tag, UserRound, Video } from "lucide-react"
-import type { CaseStatus, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
+import type { CaseStatus, Channel, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
 import { channelLabels } from "@/lib/crm-data"
 import { ChannelIcon, ChannelPill, ContactAvatar, CaseStatusPill, PriorityPill } from "./crm-primitives"
 
@@ -13,6 +13,7 @@ type InboxViewProps = {
   contacts: Contact[]
   cases: SupportCase[]
   interactions: Interaction[]
+  visibleChannels: Record<Channel, boolean>
   activeConversationId: string
   query: string
   inspectorOpen: boolean
@@ -24,7 +25,7 @@ type InboxViewProps = {
   onToggleTag: (contactId: string, tag: string) => Promise<void>
 }
 
-export function InboxView({ conversations, contacts, cases, interactions, activeConversationId, query, inspectorOpen, onToggleInspector, onSelectConversation, onSendMessage, onLogInteraction, onCreateCase, onToggleTag }: InboxViewProps) {
+export function InboxView({ conversations, contacts, cases, interactions, visibleChannels, activeConversationId, query, inspectorOpen, onToggleInspector, onSelectConversation, onSendMessage, onLogInteraction, onCreateCase, onToggleTag }: InboxViewProps) {
   const [channelFilter, setChannelFilter] = useState<string>("All channels")
   const [localSearch, setLocalSearch] = useState("")
   const [draft, setDraft] = useState("")
@@ -35,10 +36,10 @@ export function InboxView({ conversations, contacts, cases, interactions, active
   const contactInteractions = interactions.filter((item) => item.contactId === contact?.id)
   const filteredConversations = useMemo(() => conversations.filter((conversation) => {
     const person = contacts.find((item) => item.id === conversation.contactId)
-    const matchesChannel = channelFilter === "All channels" || conversation.channel === channelFilter
+    const matchesChannel = visibleChannels[conversation.channel] && (channelFilter === "All channels" || conversation.channel === channelFilter)
     const searchText = `${person?.name} ${person?.company} ${conversation.preview} ${channelLabels[conversation.channel]}`.toLowerCase()
     return matchesChannel && searchText.includes(query.toLowerCase()) && searchText.includes(localSearch.toLowerCase())
-  }), [channelFilter, contacts, conversations, query, localSearch])
+  }), [channelFilter, contacts, conversations, query, localSearch, visibleChannels])
 
   async function send() {
     const text = draft.trim()
@@ -59,7 +60,7 @@ export function InboxView({ conversations, contacts, cases, interactions, active
           <div className="mb-3 flex items-center justify-between"><div><h2 className="text-[14px] font-semibold text-slate-900 dark:text-white">Inbox</h2><p className="mt-0.5 text-[10px] text-slate-500">All conversations <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{conversations.length}</span></p></div><button aria-label="Conversation options" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Ellipsis className="size-4" /></button></div>
           <label className="flex h-8 items-center gap-2 rounded-lg border border-slate-200 px-2.5 text-slate-400 dark:border-slate-800"><Search className="size-3.5" /><input aria-label="Filter conversations" placeholder="Search conversations" className="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-slate-400 dark:text-slate-200" value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} /></label>
           <div className="mt-3 flex items-center gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none]">
-            {channelFilters.map((filter) => <button key={filter} onClick={() => setChannelFilter(filter)} className={`shrink-0 rounded-md px-2 py-1 text-[9px] font-medium transition ${channelFilter === filter ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>{filter === "All channels" ? "All" : channelLabels[filter]}</button>)}
+            {channelFilters.filter((filter) => filter === "All channels" || visibleChannels[filter]).map((filter) => <button key={filter} onClick={() => setChannelFilter(filter)} className={`shrink-0 rounded-md px-2 py-1 text-[9px] font-medium transition ${channelFilter === filter ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"}`}>{filter === "All channels" ? "All" : channelLabels[filter]}</button>)}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">

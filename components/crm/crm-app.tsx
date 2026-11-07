@@ -12,7 +12,7 @@ import { CasesView } from "./cases-view"
 import { SettingsView } from "./settings-view"
 import { InteractionDialog } from "./interaction-dialog"
 import { createClient } from "@/lib/supabase/client"
-import { pageRoutes, routePages, type CaseStatus, type Contact, type Conversation, type InteractionType, type PageKey } from "@/lib/crm-data"
+import { pageRoutes, routePages, type CaseStatus, type Contact, type Conversation, type CrmPreferences, type InteractionType, type PageKey } from "@/lib/crm-data"
 import { useCrmWorkspace } from "@/lib/crm-workspace"
 
 const pageMeta: Record<PageKey, { title: string; description: string; eyebrow: string }> = {
@@ -50,6 +50,9 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   const [interactionContactId, setInteractionContactId] = useState<string | undefined>()
   const [notice, setNotice] = useState("")
   const meta = pageMeta[activePage]
+  const viewerName = data.viewer.name.trim() || (mode === "mock" ? "Maya Chen" : "Workspace owner")
+  const viewerEmail = data.viewer.email
+  const viewerRole = mode === "live" ? "Workspace owner" : "Demo profile"
   const unreadCount = data.conversations.reduce((total, conversation) => total + conversation.unread, 0)
 
   function openInteraction(contactId?: string) {
@@ -84,6 +87,26 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     setNotice(`${interaction.type} logged${interaction.followUp ? " with a follow-up task" : ""}.`)
   }
 
+  async function handleSaveProfile(name: string) {
+    try {
+      await runMutation({ action: "update-profile", name })
+      setNotice(mode === "live" ? "Profile name saved to your Supabase account." : "Profile name saved in this browser’s mock workspace.")
+    } catch (error) {
+      setNotice(readableError(error))
+      throw error
+    }
+  }
+
+  async function handleUpdatePreferences(preferences: CrmPreferences) {
+    try {
+      await runMutation({ action: "update-preferences", preferences })
+      setNotice(mode === "live" ? "Settings saved to your Supabase account." : "Settings saved in this browser’s mock workspace.")
+    } catch (error) {
+      setNotice(readableError(error))
+      throw error
+    }
+  }
+
   async function handleToggleTag(contactId: string, tag: string) {
     try {
       await runMutation({ action: "toggle-contact-tag", contactId, tag })
@@ -116,17 +139,17 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   function renderPage() {
     if (isLoading) return <div role="status" className="flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">Loading your workspace…</div>
     if (error) return <div role="alert" className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-rose-200 bg-white p-6 text-center dark:border-rose-400/20 dark:bg-slate-950"><p className="max-w-sm text-xs leading-relaxed text-rose-700 dark:text-rose-300">{readableError(error)}</p><button onClick={() => void refresh()} className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-semibold text-white dark:bg-white dark:text-slate-900">Try again</button></div>
-    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={setActiveConversationId} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} />
+    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={setActiveConversationId} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} />
     if (activePage === "Contacts") return <ContactsView contacts={data.contacts} cases={data.cases} interactions={data.interactions} query={search} onOpenContact={setSelectedContact} />
     if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} conversations={data.conversations} query={search} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} onUpdateStatus={handleUpdateCaseStatus} />
-    if (activePage === "Settings") return <SettingsView darkMode={darkMode} onToggleTheme={toggleTheme} />
-    return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} onOpenInbox={() => router.push(pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(pageRoutes.Cases)} />
+    if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} />
+    return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} viewerName={viewerName} mode={mode} onOpenInbox={() => router.push(pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(pageRoutes.Cases)} />
   }
 
   return <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-    <CrmSidebar activePage={activePage} caseCount={data.cases.length} unreadCount={unreadCount} mockRoute={forceMock} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)} />
+    <CrmSidebar activePage={activePage} caseCount={data.cases.length} unreadCount={unreadCount} mockRoute={forceMock} collapsed={sidebarCollapsed} viewerName={viewerName} viewerRole={viewerRole} onToggleCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)} />
     <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-      <CrmHeader search={search} onSearch={setSearch} darkMode={darkMode} databaseMode={mode} onToggleTheme={toggleTheme} onSignOut={handleSignOut} />
+      <CrmHeader search={search} onSearch={setSearch} darkMode={darkMode} databaseMode={mode} viewerName={viewerName} viewerEmail={viewerEmail} onToggleTheme={toggleTheme} onSignOut={handleSignOut} />
       <MobileNavigation activePage={activePage} mockRoute={forceMock} />
       <main className="min-w-0 flex-1 px-3 pb-8 pt-5 sm:px-5 sm:pt-6 xl:px-7">
         <div className="mx-auto max-w-[1600px]">

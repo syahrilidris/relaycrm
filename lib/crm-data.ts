@@ -35,6 +35,7 @@ export type Conversation = {
   preview: string
   time: string
   unread: number
+  lastActivity?: string
   messages: Message[]
 }
 
@@ -58,11 +59,35 @@ export type Interaction = {
   followUp: boolean
 }
 
+export type CrmViewer = {
+  id: string
+  name: string
+  email: string
+}
+
+export type NotificationPreferences = {
+  replies: boolean
+  assignments: boolean
+  dailyDigest: boolean
+}
+
+export type CrmPreferences = {
+  notifications: NotificationPreferences
+  channels: Record<Channel, boolean>
+}
+
+export const defaultCrmPreferences: CrmPreferences = {
+  notifications: { replies: true, assignments: true, dailyDigest: false },
+  channels: { whatsapp: true, email: true, instagram: true, facebook: true, webchat: true },
+}
+
 export type CrmSnapshot = {
   contacts: Contact[]
   cases: SupportCase[]
   conversations: Conversation[]
   interactions: Interaction[]
+  viewer: CrmViewer
+  preferences: CrmPreferences
 }
 
 export type CrmMutation =
@@ -71,12 +96,16 @@ export type CrmMutation =
   | { action: "log-interaction"; contactId: string; type: InteractionType; summary: string; occurredAt: string; followUp: boolean }
   | { action: "update-case-status"; caseId: string; status: CaseStatus }
   | { action: "toggle-contact-tag"; contactId: string; tag: string }
+  | { action: "update-profile"; name: string }
+  | { action: "update-preferences"; preferences: CrmPreferences }
 
 export const emptyCrmSnapshot: CrmSnapshot = {
   contacts: [],
   cases: [],
   conversations: [],
   interactions: [],
+  viewer: { id: "", name: "", email: "" },
+  preferences: defaultCrmPreferences,
 }
 
 export const channelLabels: Record<Channel, string> = {
@@ -98,6 +127,10 @@ export const pageRoutes: Record<PageKey, string> = {
 export const routePages: Record<string, PageKey> = Object.fromEntries(
   Object.entries(pageRoutes).map(([page, route]) => [route, page]),
 ) as Record<string, PageKey>
+
+export function initialsForName(value: string) {
+  return value.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "U"
+}
 
 export function isChannel(value: unknown): value is Channel {
   return typeof value === "string" && Object.hasOwn(channelLabels, value)

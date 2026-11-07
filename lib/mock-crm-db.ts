@@ -1,5 +1,5 @@
 import { demoCrmData } from "@/lib/crm-demo-data"
-import type { CaseStatus, CrmMutation, CrmSnapshot, Interaction, Message, SupportCase } from "@/lib/crm-data"
+import { defaultCrmPreferences, type CaseStatus, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase } from "@/lib/crm-data"
 
 const storageKey = "relay.crm.mock.v1"
 
@@ -19,8 +19,18 @@ export async function readMockCrmData(): Promise<CrmSnapshot> {
   const stored = window.localStorage.getItem(storageKey)
   if (stored) {
     try {
-      const snapshot = JSON.parse(stored) as CrmSnapshot
-      if (Array.isArray(snapshot.contacts) && Array.isArray(snapshot.cases) && Array.isArray(snapshot.conversations) && Array.isArray(snapshot.interactions)) return snapshot
+      const snapshot = JSON.parse(stored) as Partial<CrmSnapshot>
+      if (Array.isArray(snapshot.contacts) && Array.isArray(snapshot.cases) && Array.isArray(snapshot.conversations) && Array.isArray(snapshot.interactions)) {
+        return {
+          ...demoCrmData,
+          ...snapshot,
+          viewer: { ...demoCrmData.viewer, ...snapshot.viewer },
+          preferences: {
+            notifications: { ...defaultCrmPreferences.notifications, ...snapshot.preferences?.notifications },
+            channels: { ...defaultCrmPreferences.channels, ...snapshot.preferences?.channels },
+          },
+        }
+      }
     } catch {
       window.localStorage.removeItem(storageKey)
     }
@@ -52,6 +62,7 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
       conversation.messages.push(message)
       conversation.preview = message.text
       conversation.time = "now"
+      conversation.lastActivity = now.toISOString()
       break
     }
     case "create-case": {
@@ -75,6 +86,14 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
       const contact = snapshot.contacts.find((item) => item.id === mutation.contactId)
       if (!contact) throw new Error("That contact could not be found.")
       contact.tags = contact.tags.includes(mutation.tag) ? contact.tags.filter((tag) => tag !== mutation.tag) : [...contact.tags, mutation.tag]
+      break
+    }
+    case "update-profile": {
+      snapshot.viewer.name = mutation.name
+      break
+    }
+    case "update-preferences": {
+      snapshot.preferences = mutation.preferences
       break
     }
   }

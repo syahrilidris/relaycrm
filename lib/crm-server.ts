@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { demoCrmData } from "@/lib/crm-demo-data"
-import { isChannel, type CaseStatus, type Channel, type CrmMutation, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
+import { defaultCrmPreferences, isChannel, type CaseStatus, type Channel, type CrmMutation, type CrmPreferences, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
 
 type StoredMessage = { id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string }
 
@@ -174,6 +174,7 @@ function mapConversation(row: Record<string, unknown>) {
     preview: messages.at(-1)?.text ?? "",
     time: relativeTime(String(row.last_activity)),
     unread: Number(row.unread_count ?? 0),
+    lastActivity: String(row.last_activity),
     messages,
   }
 }
@@ -188,6 +189,32 @@ function mapInteraction(row: Record<string, unknown>) {
     date: date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }),
     followUp: Boolean(row.follow_up),
   }
+}
+
+function mapUserPreferences(value: unknown): CrmPreferences {
+  if (!isRecord(value)) return defaultCrmPreferences
+  const notificationValues = isRecord(value.notifications) ? value.notifications : {}
+  const channelValues = isRecord(value.channels) ? value.channels : {}
+  return {
+    notifications: {
+      replies: typeof notificationValues.replies === "boolean" ? notificationValues.replies : defaultCrmPreferences.notifications.replies,
+      assignments: typeof notificationValues.assignments === "boolean" ? notificationValues.assignments : defaultCrmPreferences.notifications.assignments,
+      dailyDigest: typeof notificationValues.dailyDigest === "boolean" ? notificationValues.dailyDigest : defaultCrmPreferences.notifications.dailyDigest,
+    },
+    channels: {
+      whatsapp: typeof channelValues.whatsapp === "boolean" ? channelValues.whatsapp : true,
+      email: typeof channelValues.email === "boolean" ? channelValues.email : true,
+      instagram: typeof channelValues.instagram === "boolean" ? channelValues.instagram : true,
+      facebook: typeof channelValues.facebook === "boolean" ? channelValues.facebook : true,
+      webchat: typeof channelValues.webchat === "boolean" ? channelValues.webchat : true,
+    },
+  }
+}
+
+function displayNameForUser(user: User) {
+  const metadataName = user.user_metadata?.full_name ?? user.user_metadata?.name
+  if (typeof metadataName === "string" && metadataName.trim()) return metadataName.trim()
+  return user.email?.split("@")[0] || "Workspace owner"
 }
 
 export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Promise<CrmSnapshot> {
@@ -211,6 +238,8 @@ export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Prom
     cases: (casesResult.data ?? []).map((row) => mapCase(row as Record<string, unknown>)),
     conversations: (conversationsResult.data ?? []).map((row) => mapConversation(row as Record<string, unknown>)),
     interactions: (interactionsResult.data ?? []).map((row) => mapInteraction(row as Record<string, unknown>)),
+    viewer: { id: user.id, name: displayNameForUser(user), email: user.email ?? "" },
+    preferences: mapUserPreferences(user.user_metadata?.crm_preferences),
   }
 }
 
@@ -256,6 +285,18 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     if (!contactId || !tag) throw new CrmServerError(400, "Enter a valid contact tag.")
     return { action: value.action, contactId, tag }
   }
+  if (value.action === "update-profile") {
+    const name = boundedString(value.name, 80)
+    if (!name) throw new CrmServerError(400, "Enter a name up to 80 characters.")
+    return { action: value.action, name }
+  }
+  if (value.action === "update-preferences") {
+    if (!isRecord(value.preferences) || !isRecord(value.preferences.notifications) || !isRecord(value.preferences.channels)) throw new CrmServerError(400, "Invalid preference values.")
+    const notifications = value.preferences.notifications
+    const channels = value.preferences.channels
+    if ([notifications.replies, notifications.assignments, notifications.dailyDigest, channels.whatsapp, channels.email, channels.instagram, channels.facebook, channels.webchat].some((entry) => typeof entry !== "boolean")) throw new CrmServerError(400, "Invalid preference values.")
+    return { action: value.action, preferences: value.preferences as unknown as CrmPreferences }
+  }
   throw new CrmServerError(400, "Unsupported CRM action.")
 }
 
@@ -263,7 +304,7 @@ function isCaseStatus(value: unknown): value is CaseStatus {
   return value === "Open" || value === "In Progress" || value === "Waiting on Customer" || value === "Resolved"
 }
 
-export async function applyCrmMutation(supabase: SupabaseClient, user: User, mutation: CrmMutation) {
+export async function applyCrmMutation(supabase: SupabaseClient, user: User, mutation: CrmMutation): Promise<User | undefined> {
   const now = new Date().toISOString()
   if (mutation.action === "send-message") {
     const { data: conversation, error: conversationError } = await supabase.from("crm_conversations").select("id,channel,messages").eq("id", mutation.conversationId).eq("owner_id", user.id).single()
@@ -289,5 +330,13 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     const nextTags = tags.includes(mutation.tag) ? tags.filter((tag) => tag !== mutation.tag) : [...tags, mutation.tag]
     const { error } = await supabase.from("crm_contacts").update({ tags: nextTags, updated_at: now }).eq("id", mutation.contactId).eq("owner_id", user.id)
     if (error) throwDatabaseError(error)
+  } else if (mutation.action === "update-profile") {
+    const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, full_name: mutation.name } })
+    if (error) throwDatabaseError(error)
+    return data.user ?? { ...user, user_metadata: { ...user.user_metadata, full_name: mutation.name } }
+  } else if (mutation.action === "update-preferences") {
+    const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, crm_preferences: mutation.preferences } })
+    if (error) throwDatabaseError(error)
+    return data.user ?? { ...user, user_metadata: { ...user.user_metadata, crm_preferences: mutation.preferences } }
   }
 }
