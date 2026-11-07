@@ -1,6 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import { CrmApp } from '@/components/crm/crm-app'
 
 export const metadata: Metadata = {
   title: 'Relay CRM — Customer workspace',
@@ -41,7 +42,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="light">
       <body className="antialiased">
-        {children}
+        <CrmApp>{children}</CrmApp>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

@@ -1,5 +1,5 @@
-import { CrmApp } from "@/components/crm/crm-app"
+import { redirect } from "next/navigation"
 
-export default function Page() {
-  return <CrmApp />
+export default function HomePage() {
+  redirect(process.env.NODE_ENV === "development" ? "/demo" : "/inbox")
 }
