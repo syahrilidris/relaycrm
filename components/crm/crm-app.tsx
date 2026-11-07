@@ -41,6 +41,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   const activePage = routePages[pathname] ?? "Omnichannel Inbox"
   const [search, setSearch] = useState("")
   const [darkMode, setDarkMode] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [activeConversationId, setActiveConversationId] = useState("")
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
@@ -123,7 +124,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   }
 
   return <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-    <CrmSidebar activePage={activePage} caseCount={data.cases.length} unreadCount={unreadCount} mockRoute={forceMock} />
+    <CrmSidebar activePage={activePage} caseCount={data.cases.length} unreadCount={unreadCount} mockRoute={forceMock} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)} />
     <div className="flex min-h-screen min-w-0 flex-1 flex-col">
       <CrmHeader search={search} onSearch={setSearch} darkMode={darkMode} databaseMode={mode} onToggleTheme={toggleTheme} onSignOut={handleSignOut} />
       <MobileNavigation activePage={activePage} mockRoute={forceMock} />
