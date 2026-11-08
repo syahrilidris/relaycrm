@@ -37,11 +37,6 @@ function relativeTime(value: string) {
   return `${Math.floor(minutes / (24 * 60))}d`
 }
 
-function messageTime(value: string) {
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-}
-
 function mapMessages(raw: unknown, conversationId: string): Message[] {
   if (!Array.isArray(raw)) return []
   return raw.map((entry, index) => {
@@ -52,7 +47,7 @@ function mapMessages(raw: unknown, conversationId: string): Message[] {
       id: value.id || `${conversationId}-${index}`,
       from: sender,
       text: typeof value.text === "string" ? value.text : "",
-      time: typeof value.timestamp === "string" ? messageTime(value.timestamp) : "",
+      time: typeof value.timestamp === "string" ? value.timestamp : "",
       kind: type,
       ...(typeof value.subject === "string" ? { subject: value.subject } : {}),
     }
@@ -104,13 +99,14 @@ function mapConversation(row: Record<string, unknown>) {
 }
 
 function mapInteraction(row: Record<string, unknown>) {
-  const date = new Date(String(row.occurred_at))
+  const occurredAt = new Date(String(row.occurred_at))
   return {
     id: String(row.id),
     contactId: String(row.contact_id),
     type: row.type as InteractionType,
     summary: String(row.summary),
-    date: date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }),
+    // Sent as ISO and formatted in the browser so it shows in the viewer's time zone, not the server's (UTC).
+    date: Number.isNaN(occurredAt.valueOf()) ? String(row.occurred_at) : occurredAt.toISOString(),
     followUp: Boolean(row.follow_up),
   }
 }

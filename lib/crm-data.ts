@@ -166,6 +166,22 @@ export function colorForName(value: string) {
   return avatarColors[hash % avatarColors.length]
 }
 
+function parseTimestamp(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.valueOf()) ? null : parsed
+}
+
+/** Formats an ISO timestamp in the viewer's own time zone; passes other strings through unchanged. */
+export function formatDateTime(value: string) {
+  return parseTimestamp(value)?.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) ?? value
+}
+
+/** Formats an ISO timestamp as a clock time in the viewer's own time zone; passes other strings through unchanged. */
+export function formatClockTime(value: string) {
+  return parseTimestamp(value)?.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) ?? value
+}
+
 export function isPriority(value: unknown): value is Priority {
   return value === "High" || value === "Medium" || value === "Low"
 }
