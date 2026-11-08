@@ -7,8 +7,8 @@ export async function POST(request: Request) {
   try {
     const { supabase, user } = await getCrmAuthContext()
     const mutation = parseCrmMutation(await request.json())
-    await applyCrmMutation(supabase, user, mutation)
-    const snapshot = await getCrmSnapshot(supabase, user)
+    const updatedUser = await applyCrmMutation(supabase, user, mutation)
+    const snapshot = await getCrmSnapshot(supabase, updatedUser ?? user)
     return NextResponse.json(snapshot, { headers: { "Cache-Control": "private, no-store" } })
   } catch (error) {
     if (error instanceof CrmServerError) return NextResponse.json({ error: error.message }, { status: error.status })

@@ -1,8 +1,6 @@
-import { createHash } from "node:crypto"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
-import { demoCrmData } from "@/lib/crm-demo-data"
-import { isChannel, type CaseStatus, type Channel, type CrmMutation, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
+import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type CrmMutation, type CrmPreferences, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
 
 type StoredMessage = { id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string }
 
@@ -26,83 +24,9 @@ export async function getCrmAuthContext() {
   return { supabase, user }
 }
 
-function deterministicUuid(ownerId: string, key: string) {
-  const bytes = Buffer.from(createHash("sha256").update(`${ownerId}:${key}`).digest("hex").slice(0, 32), "hex")
-  bytes[6] = (bytes[6] & 0x0f) | 0x50
-  bytes[8] = (bytes[8] & 0x3f) | 0x80
-  const hex = bytes.toString("hex")
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-}
-
 function throwDatabaseError(error: unknown): never {
   console.error("[crm] Database operation failed", error)
   throw new CrmServerError(500, "The CRM database could not complete that request.")
-}
-
-async function seedDemoWorkspace(supabase: SupabaseClient, user: User) {
-  const contactIds = new Map(demoCrmData.contacts.map((contact) => [contact.id, deterministicUuid(user.id, `contact:${contact.id}`)]))
-  const conversationIds = new Map(demoCrmData.conversations.map((conversation) => [conversation.id, deterministicUuid(user.id, `conversation:${conversation.id}`)]))
-  const seededContacts = demoCrmData.contacts.map((contact) => ({
-    id: contactIds.get(contact.id),
-    owner_id: user.id,
-    name: contact.name,
-    initials: contact.initials,
-    color: contact.color,
-    company: contact.company,
-    email: contact.email,
-    phone: contact.phone,
-    primary_channel: contact.channel,
-    handle: contact.handle,
-    assigned: contact.assigned,
-    last_seen: contact.lastSeen,
-    tags: contact.tags,
-  }))
-  const { error: contactsError } = await supabase.from("crm_contacts").upsert(seededContacts, { onConflict: "id", ignoreDuplicates: true })
-  if (contactsError) throwDatabaseError(contactsError)
-
-  const seededCases = demoCrmData.cases.map((item) => ({
-    owner_id: user.id,
-    title: item.title,
-    contact_id: contactIds.get(item.contactId),
-    status: item.status,
-    priority: item.priority,
-    channel_source: item.channel,
-    notes: item.notes,
-  }))
-  const { error: casesError } = await supabase.from("crm_cases").insert(seededCases)
-  if (casesError) throwDatabaseError(casesError)
-
-  const now = Date.now()
-  const seededConversations = demoCrmData.conversations.map((conversation, conversationIndex) => ({
-    id: conversationIds.get(conversation.id),
-    owner_id: user.id,
-    contact_id: contactIds.get(conversation.contactId),
-    channel: conversation.channel,
-    messages: conversation.messages.map((message) => ({
-      id: message.id,
-      sender: message.from,
-      text: message.text,
-      timestamp: message.time,
-      type: message.kind ?? "chat",
-      ...(message.subject ? { subject: message.subject } : {}),
-    })),
-    unread_count: conversation.unread,
-    last_activity: new Date(now - conversationIndex * 4 * 60_000).toISOString(),
-  }))
-  const { error: conversationsError } = await supabase.from("crm_conversations").upsert(seededConversations, { onConflict: "id", ignoreDuplicates: true })
-  if (conversationsError) throwDatabaseError(conversationsError)
-
-  const seededInteractions = demoCrmData.interactions.map((interaction, index) => ({
-    id: deterministicUuid(user.id, `interaction:${interaction.id}`),
-    owner_id: user.id,
-    contact_id: contactIds.get(interaction.contactId),
-    type: interaction.type,
-    summary: interaction.summary,
-    occurred_at: new Date(now - index * 24 * 60 * 60_000).toISOString(),
-    follow_up: interaction.followUp,
-  }))
-  const { error: interactionsError } = await supabase.from("crm_interactions").upsert(seededInteractions, { onConflict: "id", ignoreDuplicates: true })
-  if (interactionsError) throwDatabaseError(interactionsError)
 }
 
 function relativeTime(value: string) {
@@ -174,6 +98,7 @@ function mapConversation(row: Record<string, unknown>) {
     preview: messages.at(-1)?.text ?? "",
     time: relativeTime(String(row.last_activity)),
     unread: Number(row.unread_count ?? 0),
+    lastActivity: String(row.last_activity),
     messages,
   }
 }
@@ -190,11 +115,33 @@ function mapInteraction(row: Record<string, unknown>) {
   }
 }
 
-export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Promise<CrmSnapshot> {
-  const { data: existingContacts, error: contactsCheckError } = await supabase.from("crm_contacts").select("id").eq("owner_id", user.id).limit(1)
-  if (contactsCheckError) throwDatabaseError(contactsCheckError)
-  if (existingContacts.length === 0) await seedDemoWorkspace(supabase, user)
+function mapUserPreferences(value: unknown): CrmPreferences {
+  if (!isRecord(value)) return defaultCrmPreferences
+  const notificationValues = isRecord(value.notifications) ? value.notifications : {}
+  const channelValues = isRecord(value.channels) ? value.channels : {}
+  return {
+    notifications: {
+      replies: typeof notificationValues.replies === "boolean" ? notificationValues.replies : defaultCrmPreferences.notifications.replies,
+      assignments: typeof notificationValues.assignments === "boolean" ? notificationValues.assignments : defaultCrmPreferences.notifications.assignments,
+      dailyDigest: typeof notificationValues.dailyDigest === "boolean" ? notificationValues.dailyDigest : defaultCrmPreferences.notifications.dailyDigest,
+    },
+    channels: {
+      whatsapp: typeof channelValues.whatsapp === "boolean" ? channelValues.whatsapp : true,
+      email: typeof channelValues.email === "boolean" ? channelValues.email : true,
+      instagram: typeof channelValues.instagram === "boolean" ? channelValues.instagram : true,
+      facebook: typeof channelValues.facebook === "boolean" ? channelValues.facebook : true,
+      webchat: typeof channelValues.webchat === "boolean" ? channelValues.webchat : true,
+    },
+  }
+}
 
+function displayNameForUser(user: User) {
+  const metadataName = user.user_metadata?.full_name ?? user.user_metadata?.name
+  if (typeof metadataName === "string" && metadataName.trim()) return metadataName.trim()
+  return user.email?.split("@")[0] || "Workspace owner"
+}
+
+export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Promise<CrmSnapshot> {
   const [contactsResult, casesResult, conversationsResult, interactionsResult] = await Promise.all([
     supabase.from("crm_contacts").select(contactColumns).eq("owner_id", user.id).order("name"),
     supabase.from("crm_cases").select(caseColumns).eq("owner_id", user.id).order("created_at", { ascending: false }),
@@ -211,6 +158,8 @@ export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Prom
     cases: (casesResult.data ?? []).map((row) => mapCase(row as Record<string, unknown>)),
     conversations: (conversationsResult.data ?? []).map((row) => mapConversation(row as Record<string, unknown>)),
     interactions: (interactionsResult.data ?? []).map((row) => mapInteraction(row as Record<string, unknown>)),
+    viewer: { id: user.id, name: displayNameForUser(user), email: user.email ?? "" },
+    preferences: mapUserPreferences(user.user_metadata?.crm_preferences),
   }
 }
 
@@ -222,8 +171,63 @@ function boundedString(value: unknown, maxLength: number) {
   return typeof value === "string" && value.trim().length > 0 && value.trim().length <= maxLength ? value.trim() : null
 }
 
+function optionalString(value: unknown, maxLength: number) {
+  if (value === undefined || value === null) return ""
+  if (typeof value !== "string" || value.trim().length > maxLength) return null
+  return value.trim()
+}
+
+function parseContactInput(value: unknown): ContactInput {
+  if (!isRecord(value)) throw new CrmServerError(400, "Contact details are incomplete.")
+  const name = boundedString(value.name, 120)
+  const company = optionalString(value.company, 120)
+  const email = optionalString(value.email, 160)
+  const phone = optionalString(value.phone, 40)
+  const handle = optionalString(value.handle, 120)
+  if (!name) throw new CrmServerError(400, "Enter the contact's name (up to 120 characters).")
+  if (company === null || email === null || phone === null || handle === null) throw new CrmServerError(400, "One of the contact fields is too long.")
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new CrmServerError(400, "Enter a valid email address.")
+  if (!isChannel(value.channel)) throw new CrmServerError(400, "Choose a primary channel.")
+  const rawTags = Array.isArray(value.tags) ? value.tags : []
+  const tags = [...new Set(rawTags.filter((tag): tag is string => typeof tag === "string").map((tag) => tag.trim()).filter((tag) => tag.length > 0 && tag.length <= 40))].slice(0, 20)
+  return { name, company, email, phone, handle, channel: value.channel, tags }
+}
+
 export function parseCrmMutation(value: unknown): CrmMutation {
   if (!isRecord(value) || typeof value.action !== "string") throw new CrmServerError(400, "Invalid CRM action.")
+  if (value.action === "start-conversation") {
+    const contactId = boundedString(value.contactId, 80)
+    const text = boundedString(value.text, 4000)
+    if (!contactId || !text || !isChannel(value.channel)) throw new CrmServerError(400, "Choose a contact, channel and first message.")
+    return { action: value.action, contactId, channel: value.channel, text }
+  }
+  if (value.action === "mark-conversation-read") {
+    const conversationId = boundedString(value.conversationId, 80)
+    if (!conversationId) throw new CrmServerError(400, "Invalid conversation.")
+    return { action: value.action, conversationId }
+  }
+  if (value.action === "create-contact") return { action: value.action, contact: parseContactInput(value.contact) }
+  if (value.action === "update-contact") {
+    const contactId = boundedString(value.contactId, 80)
+    if (!contactId) throw new CrmServerError(400, "Invalid contact.")
+    return { action: value.action, contactId, contact: parseContactInput(value.contact) }
+  }
+  if (value.action === "delete-contact") {
+    const contactId = boundedString(value.contactId, 80)
+    if (!contactId) throw new CrmServerError(400, "Invalid contact.")
+    return { action: value.action, contactId }
+  }
+  if (value.action === "add-case-note") {
+    const caseId = boundedString(value.caseId, 80)
+    const note = boundedString(value.note, 2000)
+    if (!caseId || !note) throw new CrmServerError(400, "Enter a note before saving.")
+    return { action: value.action, caseId, note }
+  }
+  if (value.action === "update-case-priority") {
+    const caseId = boundedString(value.caseId, 80)
+    if (!caseId || !isPriority(value.priority)) throw new CrmServerError(400, "Choose a valid priority.")
+    return { action: value.action, caseId, priority: value.priority }
+  }
   if (value.action === "send-message") {
     const conversationId = boundedString(value.conversationId, 80)
     const text = boundedString(value.text, 4000)
@@ -233,8 +237,9 @@ export function parseCrmMutation(value: unknown): CrmMutation {
   if (value.action === "create-case") {
     const contactId = boundedString(value.contactId, 80)
     const title = boundedString(value.title, 160)
-    if (!contactId || !title || !isChannel(value.channel)) throw new CrmServerError(400, "Case details are incomplete.")
-    return { action: value.action, contactId, title, channel: value.channel }
+    const note = optionalString(value.note, 2000)
+    if (!contactId || !title || !isChannel(value.channel) || note === null || (value.priority !== undefined && !isPriority(value.priority))) throw new CrmServerError(400, "Case details are incomplete.")
+    return { action: value.action, contactId, title, channel: value.channel, priority: isPriority(value.priority) ? value.priority : "Medium", ...(note ? { note } : {}) }
   }
   if (value.action === "log-interaction") {
     const contactId = boundedString(value.contactId, 80)
@@ -256,6 +261,18 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     if (!contactId || !tag) throw new CrmServerError(400, "Enter a valid contact tag.")
     return { action: value.action, contactId, tag }
   }
+  if (value.action === "update-profile") {
+    const name = boundedString(value.name, 80)
+    if (!name) throw new CrmServerError(400, "Enter a name up to 80 characters.")
+    return { action: value.action, name }
+  }
+  if (value.action === "update-preferences") {
+    if (!isRecord(value.preferences) || !isRecord(value.preferences.notifications) || !isRecord(value.preferences.channels)) throw new CrmServerError(400, "Invalid preference values.")
+    const notifications = value.preferences.notifications
+    const channels = value.preferences.channels
+    if ([notifications.replies, notifications.assignments, notifications.dailyDigest, channels.whatsapp, channels.email, channels.instagram, channels.facebook, channels.webchat].some((entry) => typeof entry !== "boolean")) throw new CrmServerError(400, "Invalid preference values.")
+    return { action: value.action, preferences: value.preferences as unknown as CrmPreferences }
+  }
   throw new CrmServerError(400, "Unsupported CRM action.")
 }
 
@@ -263,19 +280,71 @@ function isCaseStatus(value: unknown): value is CaseStatus {
   return value === "Open" || value === "In Progress" || value === "Waiting on Customer" || value === "Resolved"
 }
 
-export async function applyCrmMutation(supabase: SupabaseClient, user: User, mutation: CrmMutation) {
+function contactRow(contact: ContactInput) {
+  return {
+    name: contact.name,
+    initials: initialsForName(contact.name),
+    color: colorForName(contact.name),
+    company: contact.company,
+    email: contact.email,
+    phone: contact.phone,
+    primary_channel: contact.channel,
+    handle: contact.handle,
+    tags: contact.tags,
+  }
+}
+
+async function requireContact(supabase: SupabaseClient, user: User, contactId: string) {
+  const { data, error } = await supabase.from("crm_contacts").select("id").eq("id", contactId).eq("owner_id", user.id).maybeSingle()
+  if (error && error.code !== "22P02") throwDatabaseError(error)
+  if (!data) throw new CrmServerError(404, "That contact could not be found.")
+}
+
+export async function applyCrmMutation(supabase: SupabaseClient, user: User, mutation: CrmMutation): Promise<User | undefined> {
   const now = new Date().toISOString()
   if (mutation.action === "send-message") {
     const { data: conversation, error: conversationError } = await supabase.from("crm_conversations").select("id,channel,messages").eq("id", mutation.conversationId).eq("owner_id", user.id).single()
     if (conversationError || !conversation) throw new CrmServerError(404, "That conversation could not be found.")
     const storedMessages = Array.isArray(conversation.messages) ? conversation.messages as StoredMessage[] : []
-    const message: StoredMessage = { id: deterministicUuid(user.id, `message:${crypto.randomUUID()}`), sender: "agent", text: mutation.text, timestamp: now, type: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: "Re: Customer support" } : {}) }
+    const message: StoredMessage = { id: crypto.randomUUID(), sender: "agent", text: mutation.text, timestamp: now, type: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: "Re: Customer support" } : {}) }
     const { error } = await supabase.from("crm_conversations").update({ messages: [...storedMessages, message], last_activity: now, updated_at: now }).eq("id", mutation.conversationId).eq("owner_id", user.id)
     if (error) throwDatabaseError(error)
+  } else if (mutation.action === "start-conversation") {
+    await requireContact(supabase, user, mutation.contactId)
+    const message: StoredMessage = { id: crypto.randomUUID(), sender: "agent", text: mutation.text, timestamp: now, type: mutation.channel === "email" ? "email" : "chat" }
+    const { error } = await supabase.from("crm_conversations").insert({ owner_id: user.id, contact_id: mutation.contactId, channel: mutation.channel, messages: [message], unread_count: 0, last_activity: now })
+    if (error) throwDatabaseError(error)
+  } else if (mutation.action === "mark-conversation-read") {
+    const { error } = await supabase.from("crm_conversations").update({ unread_count: 0 }).eq("id", mutation.conversationId).eq("owner_id", user.id)
+    if (error) throwDatabaseError(error)
+  } else if (mutation.action === "create-contact") {
+    const { error } = await supabase.from("crm_contacts").insert({ owner_id: user.id, ...contactRow(mutation.contact), assigned: displayNameForUser(user), last_seen: "Added just now" })
+    if (error) throwDatabaseError(error)
+  } else if (mutation.action === "update-contact") {
+    const { data, error } = await supabase.from("crm_contacts").update({ ...contactRow(mutation.contact), updated_at: now }).eq("id", mutation.contactId).eq("owner_id", user.id).select("id").maybeSingle()
+    if (error) throwDatabaseError(error)
+    if (!data) throw new CrmServerError(404, "That contact could not be found.")
+  } else if (mutation.action === "delete-contact") {
+    const { data, error } = await supabase.from("crm_contacts").delete().eq("id", mutation.contactId).eq("owner_id", user.id).select("id").maybeSingle()
+    if (error) throwDatabaseError(error)
+    if (!data) throw new CrmServerError(404, "That contact could not be found.")
+  } else if (mutation.action === "add-case-note") {
+    const { data: item, error: readError } = await supabase.from("crm_cases").select("id,notes").eq("id", mutation.caseId).eq("owner_id", user.id).maybeSingle()
+    if (readError) throwDatabaseError(readError)
+    if (!item) throw new CrmServerError(404, "That case could not be found.")
+    const notes = Array.isArray(item.notes) ? item.notes as string[] : []
+    const { error } = await supabase.from("crm_cases").update({ notes: [...notes, mutation.note], updated_at: now }).eq("id", mutation.caseId).eq("owner_id", user.id)
+    if (error) throwDatabaseError(error)
+  } else if (mutation.action === "update-case-priority") {
+    const { data, error } = await supabase.from("crm_cases").update({ priority: mutation.priority, updated_at: now }).eq("id", mutation.caseId).eq("owner_id", user.id).select("id").maybeSingle()
+    if (error) throwDatabaseError(error)
+    if (!data) throw new CrmServerError(404, "That case could not be found.")
   } else if (mutation.action === "create-case") {
-    const { error } = await supabase.from("crm_cases").insert({ owner_id: user.id, title: mutation.title, contact_id: mutation.contactId, channel_source: mutation.channel, priority: "Medium", status: "Open", notes: ["Created from a customer conversation."] })
+    await requireContact(supabase, user, mutation.contactId)
+    const { error } = await supabase.from("crm_cases").insert({ owner_id: user.id, title: mutation.title, contact_id: mutation.contactId, channel_source: mutation.channel, priority: mutation.priority ?? "Medium", status: "Open", notes: mutation.note ? [mutation.note] : [] })
     if (error) throwDatabaseError(error)
   } else if (mutation.action === "log-interaction") {
+    await requireContact(supabase, user, mutation.contactId)
     const { error } = await supabase.from("crm_interactions").insert({ owner_id: user.id, contact_id: mutation.contactId, type: mutation.type, summary: mutation.summary, occurred_at: mutation.occurredAt, follow_up: mutation.followUp })
     if (error) throwDatabaseError(error)
   } else if (mutation.action === "update-case-status") {
@@ -289,5 +358,13 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     const nextTags = tags.includes(mutation.tag) ? tags.filter((tag) => tag !== mutation.tag) : [...tags, mutation.tag]
     const { error } = await supabase.from("crm_contacts").update({ tags: nextTags, updated_at: now }).eq("id", mutation.contactId).eq("owner_id", user.id)
     if (error) throwDatabaseError(error)
+  } else if (mutation.action === "update-profile") {
+    const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, full_name: mutation.name } })
+    if (error) throwDatabaseError(error)
+    return data.user ?? { ...user, user_metadata: { ...user.user_metadata, full_name: mutation.name } }
+  } else if (mutation.action === "update-preferences") {
+    const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, crm_preferences: mutation.preferences } })
+    if (error) throwDatabaseError(error)
+    return data.user ?? { ...user, user_metadata: { ...user.user_metadata, crm_preferences: mutation.preferences } }
   }
 }
