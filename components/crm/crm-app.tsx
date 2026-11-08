@@ -90,6 +90,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     const created = next.conversations.find((item) => !before.has(item.id))
     if (created) setActiveConversationId(created.id)
     setNotice("Conversation started and saved to your workspace.")
+    setSelectedContactId(null)
     if (activePage !== "Omnichannel Inbox") router.push(forceMock ? `/demo${pageRoutes["Omnichannel Inbox"]}` : pageRoutes["Omnichannel Inbox"])
   }
 
