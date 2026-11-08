@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { BarChart3, BriefcaseBusiness, Inbox, Layers3, PanelLeftClose, PanelLeftOpen, Settings2, UsersRound } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { pageRoutes, type PageKey } from "@/lib/crm-data"
+import { initialsForName, pageRoutes, type PageKey } from "@/lib/crm-data"
 
 type CrmSidebarProps = {
   activePage: PageKey
@@ -9,6 +9,8 @@ type CrmSidebarProps = {
   unreadCount: number
   mockRoute: boolean
   collapsed: boolean
+  viewerName: string
+  viewerRole: string
   onToggleCollapse: () => void
 }
 
@@ -24,7 +26,7 @@ const navigation: { name: PageKey; icon: typeof BarChart3; count?: "cases" | "un
   { name: "Settings", icon: Settings2 },
 ]
 
-export function CrmSidebar({ activePage, caseCount, unreadCount, mockRoute, collapsed, onToggleCollapse }: CrmSidebarProps) {
+export function CrmSidebar({ activePage, caseCount, unreadCount, mockRoute, collapsed, viewerName, viewerRole, onToggleCollapse }: CrmSidebarProps) {
   return (
     <aside className={cn("hidden min-h-screen shrink-0 flex-col border-r border-slate-800 bg-[#111827] text-slate-300 transition-[width] duration-200 lg:flex", collapsed ? "w-[76px]" : "w-[232px]")}>
       <div className={cn("flex h-[72px] shrink-0 border-b border-white/[0.07]", collapsed ? "flex-col items-center justify-center gap-1 px-2" : "items-center gap-3 px-5")}>
@@ -73,10 +75,10 @@ export function CrmSidebar({ activePage, caseCount, unreadCount, mockRoute, coll
 
       {collapsed ? <div className="mt-auto flex flex-col items-center gap-3 pb-4">
         <span title="Inbox health: live" className="flex size-8 items-center justify-center rounded-lg border border-white/[0.07] bg-white/[0.035]"><span className="size-1.5 rounded-full bg-emerald-400" /></span>
-        <div title="Maya Chen · Workspace admin" className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-cyan-500 text-[10px] font-bold text-slate-950">MC</div>
+        <div title={`${viewerName} · ${viewerRole}`} className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-cyan-500 text-[10px] font-bold text-slate-950">{initialsForName(viewerName)}</div>
       </div> : <div className="mt-auto px-4 pb-5">
-        <div className="rounded-xl border border-white/[0.07] bg-white/[0.035] p-3.5"><div className="mb-2 flex items-center justify-between"><span className="text-[11px] font-medium text-slate-300">Inbox health</span><span className="flex items-center gap-1 text-[10px] text-emerald-400"><span className="size-1.5 rounded-full bg-emerald-400" /> Live</span></div><div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-[78%] rounded-full bg-emerald-400" /></div><p className="text-[10px] leading-relaxed text-slate-500">Average response time <span className="font-medium text-slate-300">4m 32s</span></p></div>
-        <div className="mt-4 flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left"><div className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-cyan-500 text-[10px] font-bold text-slate-950">MC</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">Maya Chen</p><p className="truncate text-[10px] text-slate-500">Workspace admin</p></div><span className="size-1.5 rounded-full bg-emerald-400" /></div>
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.035] p-3.5"><div className="mb-2 flex items-center justify-between"><span className="text-[11px] font-medium text-slate-300">Workload</span><span className="flex items-center gap-1 text-[10px] text-emerald-400"><span className="size-1.5 rounded-full bg-emerald-400" /> {mockRoute ? "Demo" : "Live"}</span></div><p className="text-[10px] leading-relaxed text-slate-500"><span className="font-medium text-slate-300">{unreadCount}</span> unread {unreadCount === 1 ? "conversation" : "conversations"}</p><p className="text-[10px] leading-relaxed text-slate-500"><span className="font-medium text-slate-300">{caseCount}</span> open {caseCount === 1 ? "case" : "cases"}</p></div>
+        <div className="mt-4 flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left"><div className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-cyan-500 text-[10px] font-bold text-slate-950">{initialsForName(viewerName)}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{viewerName}</p><p className="truncate text-[10px] text-slate-500">{viewerRole}</p></div><span className="size-1.5 rounded-full bg-emerald-400" /></div>
       </div>}
     </aside>
   )
