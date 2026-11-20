@@ -17,11 +17,11 @@ export function ChannelIcon({ channel, className = "" }: { channel: Channel; cla
 
 export function ChannelPill({ channel, label = true }: { channel: Channel; label?: boolean }) {
   const labels: Record<Channel, string> = { whatsapp: "WhatsApp", email: "Email", instagram: "Instagram", facebook: "Facebook", webchat: "Webchat" }
-  return <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold ${channelStyles[channel]}`}><ChannelIcon channel={channel} className="size-3.5" />{label && labels[channel]}</span>
+  return <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-semibold ${channelStyles[channel]}`}><ChannelIcon channel={channel} className="size-3.5" />{label && labels[channel]}</span>
 }
 
 export function ContactAvatar({ contact, size = "md" }: { contact: Pick<Contact, "initials" | "color">; size?: "sm" | "md" | "lg" }) {
-  const sizes = { sm: "size-9 text-[10px]", md: "size-10 text-xs", lg: "size-12 text-sm" }
+  const sizes = { sm: "size-9 text-[11.5px]", md: "size-10 text-xs", lg: "size-12 text-sm" }
   return <div aria-hidden="true" className={`flex shrink-0 items-center justify-center rounded-full font-semibold ${sizes[size]} ${contact.color}`}>{contact.initials}</div>
 }
 
@@ -31,7 +31,7 @@ export function PriorityPill({ priority }: { priority: Priority }) {
     Medium: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/20",
     Low: "bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
   }
-  return <span className={`inline-flex items-center rounded-md px-2 py-1 text-[10px] font-semibold ring-1 ring-inset ${colors[priority]}`}>{priority}</span>
+  return <span className={`inline-flex items-center rounded-md px-2 py-1 text-[11.5px] font-semibold ring-1 ring-inset ${colors[priority]}`}>{priority}</span>
 }
 
 export function CaseStatusPill({ status }: { status: SupportCase["status"] }) {
@@ -41,5 +41,5 @@ export function CaseStatusPill({ status }: { status: SupportCase["status"] }) {
     "Waiting on Customer": "bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300",
     Resolved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300",
   }
-  return <span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${colors[status]}`}>{status}</span>
+  return <span className={`rounded-md px-2 py-1 text-[11.5px] font-semibold ${colors[status]}`}>{status}</span>
 }

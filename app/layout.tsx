@@ -1,12 +1,13 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import '@fontsource-variable/plus-jakarta-sans'
 import './globals.css'
 import { CrmApp } from '@/components/crm/crm-app'
 
 export const metadata: Metadata = {
-  title: 'Relay CRM — Customer workspace',
-  description: 'A unified workspace for customer conversations, contacts, and support cases.',
-  generator: 'v0.app',
+  title: { default: 'Bintang CRM', template: '%s · Bintang CRM' },
+  applicationName: 'Bintang CRM',
+  description: 'Omnichannel CRM for WhatsApp, Messenger and Instagram: one inbox for customer conversations, contacts and support cases.',
   icons: {
     icon: [
       {
@@ -29,8 +30,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   colorScheme: 'light dark',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f8fafc' },
-    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
+    { media: '(prefers-color-scheme: light)', color: '#F5F6FA' },
+    { media: '(prefers-color-scheme: dark)', color: '#0E1430' },
   ],
 }
 

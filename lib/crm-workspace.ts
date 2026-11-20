@@ -19,8 +19,12 @@ async function fetchLiveCrmData(): Promise<CrmSnapshot> {
 
 export function useCrmWorkspace(forceMock = false) {
   const mode: CrmMode = supabaseConfigured && !forceMock ? "live" : "mock"
-  const key = mode === "live" ? "/api/crm/data" : "relay:mock-crm-data:v1"
-  const { data, error, isLoading, mutate } = useSWR<CrmSnapshot>(key, mode === "live" ? fetchLiveCrmData : readMockCrmData)
+  const key = mode === "live" ? "/api/crm/data" : "bintang:mock-crm-data:v1"
+  const { data, error, isLoading, mutate } = useSWR<CrmSnapshot>(key, mode === "live" ? fetchLiveCrmData : readMockCrmData, {
+    // Poll so messages arriving from WhatsApp / Messenger / Instagram show up without a reload.
+    refreshInterval: mode === "live" ? 8000 : 0,
+    revalidateOnFocus: mode === "live",
+  })
 
   async function runMutation(mutation: CrmMutation) {
     let next: CrmSnapshot

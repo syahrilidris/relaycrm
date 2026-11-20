@@ -1,12 +1,16 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
-import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type CrmMutation, type CrmPreferences, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
+import { metaAppConfigured } from "@/lib/meta/config"
+import { ConnectionError, connectWhatsApp, disconnectConnection, loadConnection, sendMetaText } from "@/lib/meta/connections"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type ChannelConnection, type CrmMutation, type CrmPreferences, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
 
-type StoredMessage = { id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string }
+type StoredMessage = { id?: string; external_id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string; status?: "sent" | "delivered" | "read" | "failed"; via?: string }
 
 const contactColumns = "id,name,initials,color,company,email,phone,primary_channel,handle,assigned,last_seen,tags,created_at"
 const caseColumns = "id,title,contact_id,status,priority,channel_source,notes,created_at,updated_at"
-const conversationColumns = "id,contact_id,channel,messages,unread_count,last_activity"
+const conversationColumns = "id,contact_id,channel,messages,unread_count,last_activity,connection_id"
+const connectionColumns = "id,provider,external_account_id,display_name,status,last_error,last_event_at,created_at"
 const interactionColumns = "id,contact_id,type,summary,occurred_at,follow_up"
 
 export class CrmServerError extends Error {
@@ -50,6 +54,7 @@ function mapMessages(raw: unknown, conversationId: string): Message[] {
       time: typeof value.timestamp === "string" ? value.timestamp : "",
       kind: type,
       ...(typeof value.subject === "string" ? { subject: value.subject } : {}),
+      ...(value.status === "sent" || value.status === "delivered" || value.status === "read" || value.status === "failed" ? { status: value.status } : {}),
     }
   })
 }
@@ -84,8 +89,22 @@ function mapCase(row: Record<string, unknown>) {
   }
 }
 
-function mapConversation(row: Record<string, unknown>) {
+function mapConnection(row: Record<string, unknown>): ChannelConnection {
+  return {
+    id: String(row.id),
+    provider: row.provider as ChannelConnection["provider"],
+    externalAccountId: String(row.external_account_id),
+    name: String(row.display_name ?? ""),
+    status: row.status as ChannelConnection["status"],
+    lastError: typeof row.last_error === "string" ? row.last_error : null,
+    lastEventAt: typeof row.last_event_at === "string" ? row.last_event_at : null,
+    createdAt: String(row.created_at),
+  }
+}
+
+function mapConversation(row: Record<string, unknown>, connections: Map<string, ChannelConnection>) {
   const messages = mapMessages(row.messages, String(row.id))
+  const connection = typeof row.connection_id === "string" ? connections.get(row.connection_id) : undefined
   return {
     id: String(row.id),
     contactId: String(row.contact_id),
@@ -95,6 +114,8 @@ function mapConversation(row: Record<string, unknown>) {
     unread: Number(row.unread_count ?? 0),
     lastActivity: String(row.last_activity),
     messages,
+    connectionId: connection && connection.status !== "disconnected" ? connection.id : null,
+    ...(connection ? { connectionName: connection.name } : {}),
   }
 }
 
@@ -138,24 +159,31 @@ function displayNameForUser(user: User) {
 }
 
 export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Promise<CrmSnapshot> {
-  const [contactsResult, casesResult, conversationsResult, interactionsResult] = await Promise.all([
+  const [contactsResult, casesResult, conversationsResult, interactionsResult, connectionsResult] = await Promise.all([
     supabase.from("crm_contacts").select(contactColumns).eq("owner_id", user.id).order("name"),
     supabase.from("crm_cases").select(caseColumns).eq("owner_id", user.id).order("created_at", { ascending: false }),
     supabase.from("crm_conversations").select(conversationColumns).eq("owner_id", user.id).order("last_activity", { ascending: false }),
     supabase.from("crm_interactions").select(interactionColumns).eq("owner_id", user.id).order("occurred_at", { ascending: false }),
+    supabase.from("crm_channel_connections").select(connectionColumns).eq("owner_id", user.id).order("created_at"),
   ])
   if (contactsResult.error) throwDatabaseError(contactsResult.error)
   if (casesResult.error) throwDatabaseError(casesResult.error)
   if (conversationsResult.error) throwDatabaseError(conversationsResult.error)
   if (interactionsResult.error) throwDatabaseError(interactionsResult.error)
+  // Older databases may not have the Meta tables yet; the CRM still works without them.
+  if (connectionsResult.error) console.warn("[crm] Channel connections unavailable", connectionsResult.error.message)
+  const connections = (connectionsResult.data ?? []).map((row) => mapConnection(row as Record<string, unknown>))
+  const connectionMap = new Map(connections.map((item) => [item.id, item]))
 
   return {
     contacts: (contactsResult.data ?? []).map((row) => mapContact(row as Record<string, unknown>)),
     cases: (casesResult.data ?? []).map((row) => mapCase(row as Record<string, unknown>)),
-    conversations: (conversationsResult.data ?? []).map((row) => mapConversation(row as Record<string, unknown>)),
+    conversations: (conversationsResult.data ?? []).map((row) => mapConversation(row as Record<string, unknown>, connectionMap)),
     interactions: (interactionsResult.data ?? []).map((row) => mapInteraction(row as Record<string, unknown>)),
     viewer: { id: user.id, name: displayNameForUser(user), email: user.email ?? "" },
     preferences: mapUserPreferences(user.user_metadata?.crm_preferences),
+    connections: connections.filter((item) => item.status !== "disconnected"),
+    integrations: { metaReady: metaAppConfigured() },
   }
 }
 
@@ -269,6 +297,18 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     if ([notifications.replies, notifications.assignments, notifications.dailyDigest, channels.whatsapp, channels.email, channels.instagram, channels.facebook, channels.webchat].some((entry) => typeof entry !== "boolean")) throw new CrmServerError(400, "Invalid preference values.")
     return { action: value.action, preferences: value.preferences as unknown as CrmPreferences }
   }
+  if (value.action === "connect-whatsapp") {
+    const phoneNumberId = boundedString(value.phoneNumberId, 40)
+    const accessToken = boundedString(value.accessToken, 1000)
+    const wabaId = optionalString(value.wabaId, 40)
+    if (!phoneNumberId || !/^\d+$/.test(phoneNumberId) || !accessToken || wabaId === null || (wabaId && !/^\d+$/.test(wabaId))) throw new CrmServerError(400, "Enter a numeric Phone number ID, an optional numeric WhatsApp Business Account ID, and an access token.")
+    return { action: value.action, phoneNumberId, accessToken, ...(wabaId ? { wabaId } : {}) }
+  }
+  if (value.action === "disconnect-channel") {
+    const connectionId = boundedString(value.connectionId, 80)
+    if (!connectionId) throw new CrmServerError(400, "Invalid channel connection.")
+    return { action: value.action, connectionId }
+  }
   throw new CrmServerError(400, "Unsupported CRM action.")
 }
 
@@ -299,8 +339,18 @@ async function requireContact(supabase: SupabaseClient, user: User, contactId: s
 export async function applyCrmMutation(supabase: SupabaseClient, user: User, mutation: CrmMutation): Promise<User | undefined> {
   const now = new Date().toISOString()
   if (mutation.action === "send-message") {
-    const { data: conversation, error: conversationError } = await supabase.from("crm_conversations").select("id,channel,messages").eq("id", mutation.conversationId).eq("owner_id", user.id).single()
+    const { data: conversation, error: conversationError } = await supabase.from("crm_conversations").select("id,channel,messages,connection_id,external_user_id").eq("id", mutation.conversationId).eq("owner_id", user.id).single()
     if (conversationError || !conversation) throw new CrmServerError(404, "That conversation could not be found.")
+    if (conversation.connection_id && conversation.external_user_id) {
+      // Live Meta channel: deliver to the customer first, then record it.
+      const connection = await withConnectionErrors(() => loadConnection(String(conversation.connection_id)))
+      if (!connection || connection.owner_id !== user.id || connection.status === "disconnected") throw new CrmServerError(409, "This channel is disconnected. Reconnect it in Settings → Integrations to reply.")
+      const externalId = await withConnectionErrors(() => sendMetaText(connection, String(conversation.external_user_id), mutation.text))
+      const message: StoredMessage = { id: crypto.randomUUID(), ...(externalId ? { external_id: externalId } : {}), sender: "agent", text: mutation.text, timestamp: now, type: "chat", status: "sent", via: "meta" }
+      const { error } = await createAdminClient().rpc("crm_append_message", { p_conversation_id: conversation.id, p_message: message, p_unread_increment: 0, p_activity: now })
+      if (error) throwDatabaseError(error)
+      return
+    }
     const storedMessages = Array.isArray(conversation.messages) ? conversation.messages as StoredMessage[] : []
     const message: StoredMessage = { id: crypto.randomUUID(), sender: "agent", text: mutation.text, timestamp: now, type: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: "Re: Customer support" } : {}) }
     const { error } = await supabase.from("crm_conversations").update({ messages: [...storedMessages, message], last_activity: now, updated_at: now }).eq("id", mutation.conversationId).eq("owner_id", user.id)
@@ -358,9 +408,24 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, full_name: mutation.name } })
     if (error) throwDatabaseError(error)
     return data.user ?? { ...user, user_metadata: { ...user.user_metadata, full_name: mutation.name } }
+  } else if (mutation.action === "connect-whatsapp") {
+    await withConnectionErrors(() => connectWhatsApp(user.id, mutation))
+  } else if (mutation.action === "disconnect-channel") {
+    await withConnectionErrors(() => disconnectConnection(user.id, mutation.connectionId))
   } else if (mutation.action === "update-preferences") {
     const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, crm_preferences: mutation.preferences } })
     if (error) throwDatabaseError(error)
     return data.user ?? { ...user, user_metadata: { ...user.user_metadata, crm_preferences: mutation.preferences } }
+  }
+}
+
+async function withConnectionErrors<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof ConnectionError) throw new CrmServerError(error.status, error.message)
+    if (error instanceof CrmServerError) throw error
+    if (error instanceof Error && /not configured/i.test(error.message)) throw new CrmServerError(503, "Meta integration is not configured on the server yet (META_* environment variables).")
+    throwDatabaseError(error)
   }
 }

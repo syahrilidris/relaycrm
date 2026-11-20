@@ -6,6 +6,8 @@ export const demoCrmData: CrmSnapshot = {
     notifications: { replies: true, assignments: true, dailyDigest: false },
     channels: { whatsapp: true, email: true, instagram: true, facebook: true, webchat: true },
   },
+  connections: [],
+  integrations: { metaReady: false },
   contacts: [
     { id: "c1", name: "Olivia Rhye", initials: "OR", color: "bg-violet-100 text-violet-700", company: "Layers Studio", email: "olivia@layers.studio", phone: "+1 (415) 555-0132", channel: "whatsapp", handle: "+1 415 555 0132", assigned: "Maya Chen", lastSeen: "Online now", tags: ["VIP", "Enterprise"] },
     { id: "c2", name: "Phoenix Baker", initials: "PB", color: "bg-amber-100 text-amber-700", company: "Baker & Co.", email: "phoenix@bakerco.com", phone: "+1 (646) 555-0198", channel: "email", handle: "phoenix.baker", assigned: "Alex Morgan", lastSeen: "Active 12m ago", tags: ["New customer"] },

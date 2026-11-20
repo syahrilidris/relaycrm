@@ -1,7 +1,7 @@
 import { demoCrmData } from "@/lib/crm-demo-data"
 import { colorForName, defaultCrmPreferences, initialsForName, type CaseStatus, type Contact, type Conversation, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase } from "@/lib/crm-data"
 
-const storageKey = "relay.crm.mock.v1"
+const storageKey = "bintang.crm.mock.v1"
 
 function cloneDemoData(): CrmSnapshot {
   return JSON.parse(JSON.stringify(demoCrmData)) as CrmSnapshot
@@ -25,6 +25,8 @@ export async function readMockCrmData(): Promise<CrmSnapshot> {
           ...demoCrmData,
           ...snapshot,
           viewer: { ...demoCrmData.viewer, ...snapshot.viewer },
+          connections: [],
+          integrations: { metaReady: false },
           preferences: {
             notifications: { ...defaultCrmPreferences.notifications, ...snapshot.preferences?.notifications },
             channels: { ...defaultCrmPreferences.channels, ...snapshot.preferences?.channels },
@@ -140,6 +142,9 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
       snapshot.preferences = mutation.preferences
       break
     }
+    case "connect-whatsapp":
+    case "disconnect-channel":
+      throw new Error("Channel connections are only available in your live workspace. Sign in to connect Meta.")
   }
 
   persist(snapshot)

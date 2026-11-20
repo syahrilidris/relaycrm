@@ -4,8 +4,8 @@ import { useRef, useState, type ReactNode } from "react"
 import { Briefcase, Check, ChevronDown, MessageSquarePlus, UserPlus, X } from "lucide-react"
 import { channelLabels, type Channel, type Contact, type ContactInput, type Priority } from "@/lib/crm-data"
 
-const inputClass = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[10px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-const labelClass = "mb-1.5 block text-[10px] font-semibold text-slate-700 dark:text-slate-300"
+const inputClass = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[11.5px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+const labelClass = "mb-1.5 block text-[11.5px] font-semibold text-slate-700 dark:text-slate-300"
 const channels = Object.keys(channelLabels) as Channel[]
 const priorities: Priority[] = ["High", "Medium", "Low"]
 
@@ -37,7 +37,7 @@ function useSaving() {
 function Modal({ titleId, title, description, icon, onClose, children }: { titleId: string; title: string; description: string; icon: ReactNode; onClose: () => void; children: ReactNode }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section role="dialog" aria-modal="true" aria-labelledby={titleId} className="max-h-[calc(100vh-32px)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
-      <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800"><div><div className="mb-1 flex size-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300">{icon}</div><h2 id={titleId} className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h2><p className="mt-1 text-[10px] text-slate-500">{description}</p></div><button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="size-4" /></button></div>
+      <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800"><div><div className="mb-1 flex size-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300">{icon}</div><h2 id={titleId} className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h2><p className="mt-1 text-[11.5px] text-slate-500">{description}</p></div><button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="size-4" /></button></div>
       {children}
     </section>
   </div>
@@ -45,8 +45,8 @@ function Modal({ titleId, title, description, icon, onClose, children }: { title
 
 function FormFooter({ saving, error, label, onClose }: { saving: boolean; error: string; label: string; onClose: () => void }) {
   return <>
-    {error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[10px] text-rose-700 dark:bg-rose-400/10 dark:text-rose-300">{error}</p>}
-    <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900">Cancel</button><button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-[10px] font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"><Check className="size-3.5" />{saving ? "Saving…" : label}</button></div>
+    {error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700 dark:bg-rose-400/10 dark:text-rose-300">{error}</p>}
+    <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-slate-200 px-3 py-2 text-[11.5px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900">Cancel</button><button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-[11.5px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60"><Check className="size-3.5" />{saving ? "Saving…" : label}</button></div>
   </>
 }
 
@@ -124,7 +124,7 @@ export function CaseDialog({ contacts, defaultContactId, onClose, onSave }: { co
         <SelectField label="Contact *" value={contactId} onChange={chooseContact}>{contacts.length === 0 && <option value="">No contacts yet</option>}{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.company ? ` · ${contact.company}` : ""}</option>)}</SelectField>
         <SelectField label="Channel" value={channel} onChange={(value) => setChannel(value as Channel)}>{channels.map((item) => <option key={item} value={item}>{channelLabels[item]}</option>)}</SelectField>
         <SelectField label="Priority" value={priority} onChange={(value) => setPriority(value as Priority)}>{priorities.map((item) => <option key={item} value={item}>{item}</option>)}</SelectField>
-        <label className="sm:col-span-2"><span className={labelClass}>First note</span><textarea rows={3} maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} placeholder="What's the issue? Any context for whoever picks this up?" className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[10px] leading-relaxed text-slate-700 outline-none placeholder:text-slate-400 focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300" /></label>
+        <label className="sm:col-span-2"><span className={labelClass}>First note</span><textarea rows={3} maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} placeholder="What's the issue? Any context for whoever picks this up?" className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300" /></label>
       </div>
       <FormFooter saving={saving} error={error} label="Create case" onClose={onClose} />
     </form>
@@ -154,12 +154,12 @@ export function ConversationDialog({ contacts, defaultContactId, onClose, onSave
     }, "The conversation could not be started.")
   }
 
-  return <Modal titleId="conversation-dialog-title" title="New conversation" description="Record an outbound message to a contact. It appears in your inbox thread." icon={<MessageSquarePlus className="size-4" />} onClose={onClose}>
+  return <Modal titleId="conversation-dialog-title" title="New conversation" description="Log an outbound message to a contact. Customers on WhatsApp, Messenger or Instagram reach you first — their chats appear in the inbox automatically and replies there are delivered live." icon={<MessageSquarePlus className="size-4" />} onClose={onClose}>
     <form onSubmit={submit} className="p-5">
       <div className="grid gap-3 sm:grid-cols-2">
         <SelectField label="Contact *" value={contactId} onChange={chooseContact}>{contacts.length === 0 && <option value="">No contacts yet</option>}{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.company ? ` · ${contact.company}` : ""}</option>)}</SelectField>
         <SelectField label="Channel" value={channel} onChange={(value) => setChannel(value as Channel)}>{channels.map((item) => <option key={item} value={item}>{channelLabels[item]}</option>)}</SelectField>
-        <label className="sm:col-span-2"><span className={labelClass}>First message *</span><textarea autoFocus rows={4} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[10px] leading-relaxed text-slate-700 outline-none placeholder:text-slate-400 focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300" /></label>
+        <label className="sm:col-span-2"><span className={labelClass}>First message *</span><textarea autoFocus rows={4} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300" /></label>
       </div>
       <FormFooter saving={saving} error={error} label="Start conversation" onClose={onClose} />
     </form>

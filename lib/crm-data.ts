@@ -26,6 +26,22 @@ export type Message = {
   time: string
   kind?: "chat" | "email" | "note" | "call"
   subject?: string
+  status?: MessageStatus
+}
+
+export type MessageStatus = "sent" | "delivered" | "read" | "failed"
+
+export type MetaProvider = "whatsapp" | "facebook" | "instagram"
+
+export type ChannelConnection = {
+  id: string
+  provider: MetaProvider
+  externalAccountId: string
+  name: string
+  status: "active" | "error" | "disconnected"
+  lastError: string | null
+  lastEventAt: string | null
+  createdAt: string
 }
 
 export type Conversation = {
@@ -37,6 +53,9 @@ export type Conversation = {
   unread: number
   lastActivity?: string
   messages: Message[]
+  /** Set when the conversation is linked to a live Meta channel (replies are delivered to the customer). */
+  connectionId?: string | null
+  connectionName?: string
 }
 
 export type SupportCase = {
@@ -88,6 +107,8 @@ export type CrmSnapshot = {
   interactions: Interaction[]
   viewer: CrmViewer
   preferences: CrmPreferences
+  connections: ChannelConnection[]
+  integrations: { metaReady: boolean }
 }
 
 export type ContactInput = {
@@ -115,6 +136,8 @@ export type CrmMutation =
   | { action: "toggle-contact-tag"; contactId: string; tag: string }
   | { action: "update-profile"; name: string }
   | { action: "update-preferences"; preferences: CrmPreferences }
+  | { action: "connect-whatsapp"; phoneNumberId: string; wabaId?: string; accessToken: string }
+  | { action: "disconnect-channel"; connectionId: string }
 
 export const emptyCrmSnapshot: CrmSnapshot = {
   contacts: [],
@@ -123,6 +146,8 @@ export const emptyCrmSnapshot: CrmSnapshot = {
   interactions: [],
   viewer: { id: "", name: "", email: "" },
   preferences: defaultCrmPreferences,
+  connections: [],
+  integrations: { metaReady: false },
 }
 
 export const channelLabels: Record<Channel, string> = {
@@ -188,4 +213,9 @@ export function isPriority(value: unknown): value is Priority {
 
 export function isChannel(value: unknown): value is Channel {
   return typeof value === "string" && Object.hasOwn(channelLabels, value)
+}
+
+/** Contacts created from Meta webhooks store last activity as ISO; manual contacts store free text. */
+export function formatLastSeen(value: string) {
+  return parseTimestamp(value) ? `Last message ${formatDateTime(value)}` : value
 }
