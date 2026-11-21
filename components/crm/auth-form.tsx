@@ -103,7 +103,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         </form>}
         {supabaseReady && <p className="mt-6 border-t border-slate-200 pt-5 text-[12.5px] text-slate-500 dark:border-slate-800">{isSignUp ? "Already have an account?" : "New to Bintang CRM?"} <Link href={isSignUp ? "/login" : "/signup"} className="font-semibold text-indigo-700 hover:underline dark:text-indigo-400">{isSignUp ? "Sign in" : "Create an account"}</Link></p>}
       </section>
-      <div className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-slate-400"><span>Your data is private to your account.</span><Link href="/demo" className="font-semibold text-indigo-700 hover:underline dark:text-indigo-400">Preview with sample data</Link></div>
+      <div className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-slate-400"><span>Your data is private to your account.</span><Link href="/guide" className="font-semibold text-indigo-700 hover:underline dark:text-indigo-400">User guide</Link><span aria-hidden="true">·</span><Link href="/demo" className="font-semibold text-indigo-700 hover:underline dark:text-indigo-400">Preview with sample data</Link></div>
     </div>
     </div>
   </main>

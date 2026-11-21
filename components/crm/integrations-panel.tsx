@@ -120,7 +120,7 @@ export function IntegrationsPanel({ mode, metaReady, connections, onConnectWhats
           </div>
         })}
       </div>
-      <p className="text-[11px] text-slate-500">Messenger and Instagram connect together: choose your Facebook Pages in the Meta pop-up, and any Instagram professional account linked to those Pages is added too. <a className="inline-flex items-center gap-0.5 font-medium text-indigo-600 hover:underline dark:text-indigo-300" href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">Meta App Dashboard <ExternalLink className="size-3" /></a></p>
+      <p className="text-[11px] text-slate-500">Messenger and Instagram connect together: choose your Facebook Pages in the Meta pop-up, and any Instagram professional account linked to those Pages is added too. <a className="font-medium text-indigo-600 hover:underline dark:text-indigo-300" href="/guide#connect">Setup guide</a> · <a className="inline-flex items-center gap-0.5 font-medium text-indigo-600 hover:underline dark:text-indigo-300" href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">Meta App Dashboard <ExternalLink className="size-3" /></a></p>
     </div>
 
     {waFormOpen && <WhatsAppDialog onClose={() => setWaFormOpen(false)} onSave={async (input) => { await onConnectWhatsApp(input); setWaFormOpen(false); setBanner({ tone: "ok", text: "WhatsApp number connected." }) }} />}
