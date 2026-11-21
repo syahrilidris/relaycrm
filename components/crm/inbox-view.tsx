@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Headphones, Mail, MessageSquareText, MoreHorizontal, Paperclip, PanelRightClose, PanelRightOpen, Phone, Plus, Search, Send, Sparkles, Tag, UserRound, Video } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Headphones, Mail, MessageSquareText, MoreHorizontal, PanelRightClose, PanelRightOpen, Paperclip, Phone, Plus, Search, Send, Sparkles, Tag, UserRound, Video, X } from "lucide-react"
 import type { CaseStatus, Channel, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
 import { channelLabels, formatClockTime, formatDateTime, formatLastSeen } from "@/lib/crm-data"
 import { ChannelIcon, ChannelPill, ContactAvatar, CaseStatusPill, PriorityPill } from "./crm-primitives"
@@ -33,6 +33,10 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
   const [localSearch, setLocalSearch] = useState("")
   const [draft, setDraft] = useState("")
   const [messageError, setMessageError] = useState("")
+  // Phones: the chat opens as its own full-screen page instead of stacking under the list.
+  const [mobileChatOpen, setMobileChatOpen] = useState(false)
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0]
   const contact = contacts.find((item) => item.id === activeConversation?.contactId)
   const activeCases = cases.filter((item) => item.contactId === contact?.id)
@@ -43,6 +47,48 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
     const searchText = `${person?.name} ${person?.company} ${conversation.preview} ${channelLabels[conversation.channel]}`.toLowerCase()
     return matchesChannel && searchText.includes(query.toLowerCase()) && searchText.includes(localSearch.toLowerCase())
   }), [channelFilter, contacts, conversations, query, localSearch, visibleChannels])
+
+  const isDesktop = () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches
+
+  function openConversation(id: string) {
+    onSelectConversation(id)
+    setMessageError("")
+    if (isDesktop()) return
+    if (!mobileChatOpen) window.history.pushState({ bintangChat: id }, "")
+    setMobileChatOpen(true)
+  }
+
+  // Back arrow and the phone's own back button both return to the list.
+  const closeMobileChat = useCallback(() => {
+    if (window.history.state?.bintangChat) window.history.back()
+    else setMobileChatOpen(false)
+    setMobileDetailsOpen(false)
+  }, [])
+
+  function toggleDetails() {
+    if (isDesktop()) onToggleInspector()
+    else setMobileDetailsOpen((open) => !open)
+  }
+
+  useEffect(() => {
+    const onPop = () => { setMobileChatOpen(false); setMobileDetailsOpen(false) }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
+
+  // Stop the page behind the full-screen chat from scrolling.
+  useEffect(() => {
+    if (!mobileChatOpen || isDesktop()) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => { document.body.style.overflow = previous }
+  }, [mobileChatOpen])
+
+  // Always land on the newest message.
+  const messageCount = activeConversation?.messages.length ?? 0
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" })
+  }, [activeConversation?.id, messageCount, mobileChatOpen])
 
   async function send() {
     const text = draft.trim()
@@ -57,8 +103,8 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
   }
 
   return (
-    <div className={`grid min-h-[calc(100vh-144px)] grid-cols-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_2px_12px_rgba(15,23,42,0.025)] dark:border-slate-800 dark:bg-slate-950 ${inspectorOpen ? "lg:grid-cols-[230px_minmax(0,1fr)_230px]" : "lg:grid-cols-[260px_minmax(0,1fr)]"}`}>
-      <section aria-label="Conversation list" className="flex min-h-[310px] flex-col border-b border-slate-200 dark:border-slate-800 lg:min-h-0 lg:border-b-0 lg:border-r">
+    <div className={`grid grid-cols-1 overflow-hidden lg:h-[calc(100dvh-224px)] lg:min-h-[520px] rounded-xl border border-slate-200 bg-white shadow-[0_2px_12px_rgba(15,23,42,0.025)] dark:border-slate-800 dark:bg-slate-950 ${inspectorOpen ? "lg:grid-cols-[230px_minmax(0,1fr)_230px]" : "lg:grid-cols-[260px_minmax(0,1fr)]"}`}>
+      <section aria-label="Conversation list" className="flex min-h-0 flex-col border-b border-slate-200 dark:border-slate-800 lg:min-h-0 lg:border-b-0 lg:border-r">
         <div className="border-b border-slate-100 px-4 pb-3 pt-4 dark:border-slate-800">
           <div className="mb-3 flex items-center justify-between"><div><h2 className="text-[14px] font-semibold text-slate-900 dark:text-white">Inbox</h2><p className="mt-0.5 text-[11.5px] text-slate-500">All conversations <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{conversations.length}</span></p></div><button onClick={onStartConversation} aria-label="New conversation" title="New conversation" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-indigo-700 dark:hover:bg-slate-800"><Plus className="size-4" /></button></div>
           <label className="flex h-8 items-center gap-2 rounded-lg border border-slate-200 px-2.5 text-slate-400 dark:border-slate-800"><Search className="size-3.5" /><input aria-label="Filter conversations" placeholder="Search conversations" className="min-w-0 flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-slate-400 dark:text-slate-200" value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} /></label>
@@ -72,7 +118,7 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
             const person = contacts.find((item) => item.id === conversation.contactId)
             if (!person) return null
             const active = conversation.id === activeConversation?.id
-            return <button key={conversation.id} onClick={() => onSelectConversation(conversation.id)} aria-current={active ? "true" : undefined} className={`flex w-full gap-2.5 border-b border-slate-100 px-3.5 py-3 text-left transition dark:border-slate-900 ${active ? "bg-indigo-50/70 dark:bg-indigo-400/[0.07]" : "hover:bg-slate-50 dark:hover:bg-slate-900/70"}`}>
+            return <button key={conversation.id} onClick={() => openConversation(conversation.id)} aria-current={active ? "true" : undefined} className={`flex w-full gap-2.5 border-b border-slate-100 px-3.5 py-3 text-left transition dark:border-slate-900 ${active ? "bg-indigo-50/70 dark:bg-indigo-400/[0.07]" : "hover:bg-slate-50 dark:hover:bg-slate-900/70"}`}>
               <div className="relative shrink-0"><ContactAvatar contact={person} size="md" /><span className={`absolute -bottom-0.5 -right-0.5 flex size-[17px] items-center justify-center rounded-full border-2 border-white dark:border-slate-950 ${active ? "bg-indigo-50 dark:bg-slate-900" : "bg-white dark:bg-slate-950"}`}><ChannelIcon channel={conversation.channel} className="size-2.5 text-current" /></span></div>
               <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className={`truncate text-[12.5px] ${conversation.unread ? "font-semibold text-slate-900 dark:text-white" : "font-medium text-slate-800 dark:text-slate-200"}`}>{person.name}</span><span className="shrink-0 text-[10.5px] text-slate-400">{conversation.time}</span></div><div className="mt-0.5 flex items-center justify-between gap-2"><span className="truncate text-[11.5px] text-slate-500">{conversation.preview}</span>{conversation.unread > 0 && <span className="flex size-[17px] shrink-0 items-center justify-center rounded-full bg-indigo-500 text-[10.5px] font-semibold text-white">{conversation.unread}</span>}</div><div className="mt-1.5 flex items-center gap-1.5"><ChannelPill channel={conversation.channel} /><span className="truncate text-[10.5px] text-slate-400">{person.company}</span></div></div>
             </button>
@@ -81,11 +127,11 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
         </div>
       </section>
 
-      <section className="flex min-h-[570px] min-w-0 flex-col lg:min-h-0">
+      <section aria-label="Conversation" className={`${mobileChatOpen ? "fixed inset-0 z-40 flex h-[100dvh] bg-white dark:bg-slate-950" : "hidden"} min-w-0 flex-col lg:static lg:z-auto lg:flex lg:h-auto lg:min-h-0`}>
         {activeConversation && contact ? <>
           <div className="flex h-[62px] shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-4 dark:border-slate-800 sm:px-5">
-            <div className="flex min-w-0 items-center gap-2.5"><ContactAvatar contact={contact} size="sm" /><div className="min-w-0"><div className="flex items-center gap-2"><h2 className="truncate text-xs font-semibold text-slate-900 dark:text-white">{contact.name}</h2><span className="hidden size-1.5 rounded-full bg-indigo-400 sm:block" /></div><p className="mt-0.5 truncate text-[11.5px] text-slate-500">{formatLastSeen(contact.lastSeen)} <span className="px-1 text-slate-300">·</span> <ChannelPill channel={activeConversation.channel} />{activeConversation.connectionId && <span title={`Live via ${activeConversation.connectionName ?? "Meta"}`} className="ml-1.5 inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[11.5px] font-semibold text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300"><span className="size-1.5 rounded-full bg-indigo-500" />Live · {activeConversation.connectionName}</span>}</p></div></div>
-            <div className="flex shrink-0 items-center gap-0.5"><button onClick={onLogInteraction} aria-label="Log a call" title="Log a call" className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"><Phone className="size-4" /></button><button onClick={() => void onCreateCase(activeConversation)} title="Convert to support case" className="hidden items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 transition hover:bg-slate-50 sm:flex dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"><Plus className="size-3.5" /> Create case</button><button onClick={onToggleInspector} aria-label={inspectorOpen ? "Hide contact details" : "Show contact details"} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800">{inspectorOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}</button></div>
+            <div className="flex min-w-0 items-center gap-2.5"><button onClick={closeMobileChat} aria-label="Back to conversations" className="-ml-1.5 rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 lg:hidden"><ArrowLeft className="size-[18px]" /></button><ContactAvatar contact={contact} size="sm" /><div className="min-w-0"><div className="flex items-center gap-2"><h2 className="truncate text-xs font-semibold text-slate-900 dark:text-white">{contact.name}</h2><span className="hidden size-1.5 rounded-full bg-indigo-400 sm:block" /></div><p className="mt-0.5 truncate text-[11.5px] text-slate-500">{formatLastSeen(contact.lastSeen)} <span className="px-1 text-slate-300">·</span> <ChannelPill channel={activeConversation.channel} />{activeConversation.connectionId && <span title={`Live via ${activeConversation.connectionName ?? "Meta"}`} className="ml-1.5 inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[11.5px] font-semibold text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300"><span className="size-1.5 rounded-full bg-indigo-500" />Live · {activeConversation.connectionName}</span>}</p></div></div>
+            <div className="flex shrink-0 items-center gap-0.5"><button onClick={onLogInteraction} aria-label="Log a call" title="Log a call" className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"><Phone className="size-4" /></button><button onClick={() => void onCreateCase(activeConversation)} title="Convert to support case" className="hidden items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 transition hover:bg-slate-50 sm:flex dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"><Plus className="size-3.5" /> Create case</button><button onClick={toggleDetails} aria-label={inspectorOpen ? "Hide contact details" : "Show contact details"} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800">{inspectorOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}</button></div>
           </div>
           <div className="flex min-h-0 flex-1 flex-col bg-[#fbfcfd] dark:bg-slate-950">
             <div className="flex items-center justify-center gap-2 py-3"><span className="h-px w-8 bg-slate-200 dark:bg-slate-800" /><span className="text-[10.5px] font-medium text-slate-400">{activeConversation.lastActivity && !Number.isNaN(new Date(activeConversation.lastActivity).valueOf()) ? `Last activity ${new Date(activeConversation.lastActivity).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : "Conversation history"}</span><span className="h-px w-8 bg-slate-200 dark:bg-slate-800" /></div>
@@ -96,9 +142,10 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
                   if (message.kind === "email") return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`w-full max-w-[430px] rounded-xl border bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${message.from === "agent" ? "border-indigo-200 dark:border-indigo-400/20" : "border-slate-200"}`}><div className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2 dark:border-slate-800"><span className="flex size-6 items-center justify-center rounded-md bg-sky-50 text-sky-600 dark:bg-sky-400/10 dark:text-sky-300"><Mail className="size-3" /></span><div className="min-w-0 flex-1"><p className="truncate text-[11.5px] font-semibold text-slate-700 dark:text-slate-200">{message.subject}</p><p className="text-[10.5px] text-slate-400">{message.from === "contact" ? contact.email : agentEmail ? `${agentName} · ${agentEmail}` : agentName}</p></div><span className="text-[10.5px] text-slate-400">{formatClockTime(message.time)}</span></div><p className="whitespace-pre-line text-[12.5px] leading-[1.7] text-slate-600 dark:text-slate-300">{message.text}</p></div></div>
                   return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] sm:max-w-[72%] ${message.from === "agent" ? "items-end" : "items-start"} flex flex-col`}><div className={`rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.65] ${message.from === "agent" ? "rounded-br-md bg-indigo-600 text-white shadow-sm shadow-indigo-800/10" : "rounded-bl-md border border-slate-200 bg-white text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"}`}>{message.text}</div><span className={`mt-1 flex items-center gap-1 text-[10.5px] text-slate-400 ${message.from === "agent" ? "flex-row-reverse" : ""}`}>{formatClockTime(message.time)}{message.from === "agent" && <DeliveryTick status={message.status} />}</span></div></div>
                 })}
+                <div ref={messagesEndRef} />
               </div>
             </div>
-            <div className="shrink-0 border-t border-slate-100 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-950 sm:px-5 sm:py-4">
+            <div className="shrink-0 border-t border-slate-100 bg-white p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-950 sm:px-5 sm:py-4">
               <div className="mx-auto max-w-[690px] rounded-xl border border-slate-200 bg-white shadow-sm focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-900">
                 <textarea aria-label={`Reply to ${contact.name}`} placeholder={`Reply to ${contact.name}...`} rows={2} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }} className="block w-full resize-none bg-transparent px-3.5 pt-3 text-[12.5px] text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200" />
                 <div className="flex items-center justify-between px-2.5 pb-2"><div className="flex items-center gap-0.5"><button aria-label="Attach file" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Paperclip className="size-3.5" /></button><button aria-label="Insert template" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Sparkles className="size-3.5" /></button><span className="ml-1 hidden text-[10.5px] text-slate-400 sm:inline">{activeConversation.connectionId ? `Enter sends to the customer on ${channelLabels[activeConversation.channel]}` : "Enter to save · not linked to a live channel"}</span></div><button onClick={() => void send()} disabled={!draft.trim()} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[11.5px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"><Send className="size-3" /> Send</button></div>
@@ -109,9 +156,10 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
         </> : <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-500"><p>{conversations.length ? "Select a conversation to get started." : contacts.length ? "Start a conversation with one of your contacts." : "Add a contact on the Contacts page, then start a conversation here."}</p>{conversations.length === 0 && contacts.length > 0 && <button onClick={onStartConversation} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-indigo-700"><Plus className="size-3.5" /> New conversation</button>}</div>}
       </section>
 
-      {inspectorOpen && contact && <aside aria-label="Contact details" className="min-h-[430px] border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950 lg:min-h-0 lg:border-l lg:border-t-0">
-        <div className="flex h-[62px] items-center justify-between border-b border-slate-100 px-4 dark:border-slate-800"><div className="flex items-center gap-2"><UserRound className="size-4 text-slate-400" /><h2 className="text-xs font-semibold text-slate-800 dark:text-slate-100">Contact details</h2></div><button aria-label="Close contact details" onClick={onToggleInspector} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><PanelRightClose className="size-4" /></button></div>
-        <div className="max-h-[calc(100vh-210px)] overflow-y-auto p-4">
+      {contact && (inspectorOpen || mobileDetailsOpen) && <aside aria-label="Contact details" className={`${mobileChatOpen && mobileDetailsOpen ? "fixed inset-0 z-50 flex flex-col" : "hidden"} ${inspectorOpen ? "lg:flex" : "lg:hidden"} bg-white dark:bg-slate-950 lg:static lg:z-auto lg:min-h-0 lg:flex-col lg:border-l lg:border-slate-200 lg:dark:border-slate-800`}>
+        <div className="flex h-[56px] shrink-0 items-center justify-between border-b border-slate-100 px-3 dark:border-slate-800 lg:hidden"><p className="text-[13px] font-semibold text-slate-900 dark:text-white">Contact details</p><button onClick={() => setMobileDetailsOpen(false)} aria-label="Close contact details" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="size-[18px]" /></button></div>
+        <div className="hidden h-[62px] shrink-0 items-center justify-between border-b border-slate-100 px-4 dark:border-slate-800 lg:flex"><div className="flex items-center gap-2"><UserRound className="size-4 text-slate-400" /><h2 className="text-xs font-semibold text-slate-800 dark:text-slate-100">Contact details</h2></div><button aria-label="Close contact details" onClick={onToggleInspector} className="hidden rounded-md p-1.5 lg:inline-flex text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><PanelRightClose className="size-4" /></button></div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="flex flex-col items-center border-b border-slate-100 pb-4 text-center dark:border-slate-800"><ContactAvatar contact={contact} size="lg" /><h3 className="mt-2.5 text-xs font-semibold text-slate-900 dark:text-white">{contact.name}</h3><p className="mt-0.5 text-[11.5px] text-slate-500">{contact.company}</p><span className="mt-2 rounded-full bg-indigo-50 px-2 py-0.5 text-[10.5px] font-medium text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300">{formatLastSeen(contact.lastSeen)}</span></div>
           <div className="grid grid-cols-2 gap-2 border-b border-slate-100 py-3 dark:border-slate-800"><div><p className="text-[10.5px] font-medium tracking-wide text-slate-400">Email</p><p className="mt-1 truncate text-[11.5px] text-slate-700 dark:text-slate-300">{contact.email}</p></div><div><p className="text-[10.5px] font-medium tracking-wide text-slate-400">Phone</p><p className="mt-1 truncate text-[11.5px] text-slate-700 dark:text-slate-300">{contact.phone}</p></div><div><p className="text-[10.5px] font-medium tracking-wide text-slate-400">Assigned to</p><p className="mt-1 text-[11.5px] text-slate-700 dark:text-slate-300">{contact.assigned}</p></div><div><p className="text-[10.5px] font-medium tracking-wide text-slate-400">Primary channel</p><div className="mt-1"><ChannelPill channel={contact.channel} /></div></div></div>
           <div className="border-b border-slate-100 py-3 dark:border-slate-800"><div className="mb-2 flex items-center justify-between"><h3 className="text-[11.5px] font-semibold text-slate-800 dark:text-slate-200">Tags</h3><Tag className="size-3.5 text-slate-400" /></div><div className="flex flex-wrap gap-1.5">{contact.tags.map((tag) => <button key={tag} onClick={() => void onToggleTag(contact.id, tag)} className="rounded-md bg-slate-100 px-2 py-1 text-[10.5px] font-medium text-slate-600 transition hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-400/10">{tag} <span className="ml-0.5 opacity-50">×</span></button>)}<button onClick={() => { const tag = window.prompt(`Add a tag for ${contact.name}`)?.trim(); if (tag && !contact.tags.includes(tag)) void onToggleTag(contact.id, tag.slice(0, 40)) }} className="rounded-md border border-dashed border-slate-300 px-2 py-1 text-[10.5px] font-medium text-slate-500 hover:border-indigo-400 hover:text-indigo-700 dark:border-slate-700 dark:hover:text-indigo-300">+ Add tag</button></div></div>
