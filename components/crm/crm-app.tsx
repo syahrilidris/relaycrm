@@ -74,9 +74,8 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   }
 
   async function handleSendMessage(conversationId: string, text: string) {
+    // The message bubble itself shows Sending… / ticks / Not sent, so no page banner here.
     await runMutation({ action: "send-message", conversationId, text })
-    const conversation = data.conversations.find((item) => item.id === conversationId)
-    setNotice(conversation?.connectionId ? `Reply delivered via ${channelLabels[conversation.channel]}.` : "Reply saved to your workspace.")
   }
 
   function handleSelectConversation(conversationId: string) {

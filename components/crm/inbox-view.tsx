@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Headphones, Mail, MessageSquareText, MoreHorizontal, PanelRightClose, PanelRightOpen, Paperclip, Phone, Plus, Search, Send, Sparkles, Tag, UserRound, Video, X } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Headphones, Loader2, Mail, MessageSquareText, MoreHorizontal, PanelRightClose, PanelRightOpen, Paperclip, Phone, Plus, RotateCw, Search, Send, Sparkles, Tag, UserRound, Video, X } from "lucide-react"
 import type { CaseStatus, Channel, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
 import { channelLabels, formatClockTime, formatDateTime, formatLastSeen } from "@/lib/crm-data"
 import { ChannelIcon, ChannelPill, ContactAvatar, CaseStatusPill, PriorityPill } from "./crm-primitives"
@@ -36,9 +36,13 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
   // Phones: the chat opens as its own full-screen page instead of stacking under the list.
   const [mobileChatOpen, setMobileChatOpen] = useState(false)
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
+  // Replies shown instantly while the server saves/delivers them.
+  const [outbox, setOutbox] = useState<OutgoingMessage[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0]
   const contact = contacts.find((item) => item.id === activeConversation?.contactId)
+  const pendingHere = outbox.filter((item) => item.conversationId === activeConversation?.id)
+  const sendingHere = pendingHere.some((item) => item.status === "sending")
   const activeCases = cases.filter((item) => item.contactId === contact?.id)
   const contactInteractions = interactions.filter((item) => item.contactId === contact?.id)
   const filteredConversations = useMemo(() => conversations.filter((conversation) => {
@@ -88,19 +92,43 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
   const messageCount = activeConversation?.messages.length ?? 0
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" })
-  }, [activeConversation?.id, messageCount, mobileChatOpen])
+  }, [activeConversation?.id, messageCount, mobileChatOpen, pendingHere.length])
 
-  async function send() {
-    const text = draft.trim()
-    if (!text || !activeConversation) return
-    setMessageError("")
+
+  async function deliver(item: OutgoingMessage) {
     try {
-      await onSendMessage(activeConversation.id, text)
-      setDraft("")
+      await onSendMessage(item.conversationId, item.text)
+      // The saved copy is now in the conversation, so drop the placeholder.
+      setOutbox((current) => current.filter((entry) => entry.key !== item.key))
     } catch (error) {
-      setMessageError(error instanceof Error ? error.message : "Your reply could not be saved.")
+      const reason = error instanceof Error ? error.message : "Your reply could not be sent."
+      setOutbox((current) => current.map((entry) => entry.key === item.key ? { ...entry, status: "failed", error: reason } : entry))
     }
   }
+
+  function send() {
+    const text = draft.trim()
+    // One reply at a time per chat, so a slow network can't produce duplicates.
+    if (!text || !activeConversation || sendingHere) return
+    setMessageError("")
+    setDraft("")
+    const item: OutgoingMessage = { key: crypto.randomUUID(), conversationId: activeConversation.id, text, time: new Date().toISOString(), status: "sending" }
+    setOutbox((current) => [...current, item])
+    void deliver(item)
+  }
+
+  function retry(item: OutgoingMessage) {
+    if (sendingHere) return
+    const next: OutgoingMessage = { ...item, status: "sending", error: undefined }
+    setOutbox((current) => current.map((entry) => entry.key === item.key ? next : entry))
+    void deliver(next)
+  }
+
+  function discard(item: OutgoingMessage) {
+    setOutbox((current) => current.filter((entry) => entry.key !== item.key))
+    if (!draft.trim()) setDraft(item.text)
+  }
+
 
   return (
     <div className={`grid grid-cols-1 overflow-hidden lg:h-[calc(100dvh-224px)] lg:min-h-[520px] rounded-xl border border-slate-200 bg-white shadow-[0_2px_12px_rgba(15,23,42,0.025)] dark:border-slate-800 dark:bg-slate-950 ${inspectorOpen ? "lg:grid-cols-[230px_minmax(0,1fr)_230px]" : "lg:grid-cols-[260px_minmax(0,1fr)]"}`}>
@@ -142,13 +170,20 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
                   if (message.kind === "email") return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`w-full max-w-[430px] rounded-xl border bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${message.from === "agent" ? "border-indigo-200 dark:border-indigo-400/20" : "border-slate-200"}`}><div className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2 dark:border-slate-800"><span className="flex size-6 items-center justify-center rounded-md bg-sky-50 text-sky-600 dark:bg-sky-400/10 dark:text-sky-300"><Mail className="size-3" /></span><div className="min-w-0 flex-1"><p className="truncate text-[11.5px] font-semibold text-slate-700 dark:text-slate-200">{message.subject}</p><p className="text-[10.5px] text-slate-400">{message.from === "contact" ? contact.email : agentEmail ? `${agentName} · ${agentEmail}` : agentName}</p></div><span className="text-[10.5px] text-slate-400">{formatClockTime(message.time)}</span></div><p className="whitespace-pre-line text-[12.5px] leading-[1.7] text-slate-600 dark:text-slate-300">{message.text}</p></div></div>
                   return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] sm:max-w-[72%] ${message.from === "agent" ? "items-end" : "items-start"} flex flex-col`}><div className={`rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.65] ${message.from === "agent" ? "rounded-br-md bg-indigo-600 text-white shadow-sm shadow-indigo-800/10" : "rounded-bl-md border border-slate-200 bg-white text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"}`}>{message.text}</div><span className={`mt-1 flex items-center gap-1 text-[10.5px] text-slate-400 ${message.from === "agent" ? "flex-row-reverse" : ""}`}>{formatClockTime(message.time)}{message.from === "agent" && <DeliveryTick status={message.status} />}</span></div></div>
                 })}
+                {pendingHere.map((item) => <div key={item.key} className="flex justify-end"><div className="flex max-w-[82%] flex-col items-end sm:max-w-[72%]">
+                  <div className={`rounded-2xl rounded-br-md px-3.5 py-2.5 text-[12.5px] leading-[1.65] text-white ${item.status === "failed" ? "bg-rose-500/90" : "bg-indigo-600/70"}`}>{item.text}</div>
+                  {item.status === "sending"
+                    ? <span className="mt-1 flex items-center gap-1 text-[10.5px] text-slate-400" role="status"><Loader2 className="size-3 animate-spin" />Sending…</span>
+                    : <span className="mt-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[10.5px]" role="alert"><span className="font-medium text-rose-600 dark:text-rose-300" title={item.error}>Not sent</span><button onClick={() => retry(item)} disabled={sendingHere} className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline disabled:opacity-50 dark:text-indigo-300"><RotateCw className="size-3" />Retry</button><button onClick={() => discard(item)} className="text-slate-500 hover:underline">Remove</button></span>}
+                  {item.status === "failed" && item.error && <span className="mt-0.5 max-w-[320px] text-right text-[10.5px] text-rose-600/90 dark:text-rose-300/90">{item.error}</span>}
+                </div></div>)}
                 <div ref={messagesEndRef} />
               </div>
             </div>
             <div className="shrink-0 border-t border-slate-100 bg-white p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-950 sm:px-5 sm:py-4">
               <div className="mx-auto max-w-[690px] rounded-xl border border-slate-200 bg-white shadow-sm focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-900">
-                <textarea aria-label={`Reply to ${contact.name}`} placeholder={`Reply to ${contact.name}...`} rows={2} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }} className="block w-full resize-none bg-transparent px-3.5 pt-3 text-[12.5px] text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200" />
-                <div className="flex items-center justify-between px-2.5 pb-2"><div className="flex items-center gap-0.5"><button aria-label="Attach file" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Paperclip className="size-3.5" /></button><button aria-label="Insert template" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Sparkles className="size-3.5" /></button><span className="ml-1 hidden text-[10.5px] text-slate-400 sm:inline">{activeConversation.connectionId ? `Enter sends to the customer on ${channelLabels[activeConversation.channel]}` : "Enter to save · not linked to a live channel"}</span></div><button onClick={() => void send()} disabled={!draft.trim()} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[11.5px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"><Send className="size-3" /> Send</button></div>
+                <textarea aria-label={`Reply to ${contact.name}`} placeholder={`Reply to ${contact.name}...`} rows={2} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send() } }} className="block w-full resize-none bg-transparent px-3.5 pt-3 text-[12.5px] text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200" />
+                <div className="flex items-center justify-between px-2.5 pb-2"><div className="flex items-center gap-0.5"><button aria-label="Attach file" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Paperclip className="size-3.5" /></button><button aria-label="Insert template" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Sparkles className="size-3.5" /></button><span className="ml-1 hidden text-[10.5px] text-slate-400 sm:inline">{activeConversation.connectionId ? `Enter sends to the customer on ${channelLabels[activeConversation.channel]}` : "Enter to save · not linked to a live channel"}</span></div><button onClick={send} disabled={!draft.trim() || sendingHere} aria-busy={sendingHere} className="flex min-w-[84px] items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[11.5px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{sendingHere ? <><Loader2 className="size-3 animate-spin" /> Sending…</> : <><Send className="size-3" /> Send</>}</button></div>
               </div>
               {messageError && <p role="alert" className="mx-auto mt-2 max-w-[690px] text-[11.5px] text-rose-600 dark:text-rose-300">{messageError}</p>}
             </div>
@@ -179,3 +214,5 @@ function DeliveryTick({ status }: { status?: "sent" | "delivered" | "read" | "fa
   if (status === "sent") return <Check className="size-3 text-slate-400" aria-label="Sent" />
   return <CheckCheck className="size-3 text-indigo-400" aria-label="Saved" />
 }
+
+type OutgoingMessage = { key: string; conversationId: string; text: string; time: string; status: "sending" | "failed"; error?: string }
