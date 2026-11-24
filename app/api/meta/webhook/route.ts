@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   const raw = await request.text()
   const { appSecret } = getMetaConfig()
   if (!verifyMetaSignature(raw, request.headers.get("x-hub-signature-256"), appSecret)) {
-    console.warn("[meta-webhook] rejected: invalid signature", { hasHeader: Boolean(request.headers.get("x-hub-signature-256")), hasSecret: Boolean(appSecret), bytes: raw.length })
+    console.warn("[meta-webhook] rejected: invalid signature", { hasHeader: Boolean(request.headers.get("x-hub-signature-256")), secretLength: appSecret.length, rawSecretLength: (process.env.META_APP_SECRET ?? "").length, secretIsHex: /^[0-9a-f]+$/i.test(appSecret), bytes: raw.length })
     return new NextResponse("Invalid signature", { status: 401 })
   }
   let payload: unknown
