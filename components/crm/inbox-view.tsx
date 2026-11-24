@@ -204,7 +204,7 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
               </div>
             </div>
             <div className="shrink-0 border-t border-slate-100 bg-white p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-950 sm:px-5 sm:py-4">
-              <ChatComposer key={activeConversation.id} placeholder={`Reply to ${contact.name}…`} hint={activeConversation.connectionId ? `Enter sends on ${channelLabels[activeConversation.channel]}` : "Enter to save · not linked to a live channel"} busy={sendingHere} quickReplies={quickReplies} onSaveQuickReplies={onSaveQuickReplies} uploadFile={uploadFile} onSend={send} />
+              <ChatComposer key={activeConversation.id} placeholder={`Reply to ${contact.name}…`} hint={activeConversation.connectionId ? `Enter sends on ${channelLabels[activeConversation.channel]}` : activeConversation.channel === "webchat" ? "Enter sends to the website chat" : "Enter to save · not linked to a live channel"} busy={sendingHere} quickReplies={quickReplies} onSaveQuickReplies={onSaveQuickReplies} uploadFile={uploadFile} onSend={send} />
               {messageError && <p role="alert" className="mx-auto mt-2 max-w-[690px] text-[11.5px] text-rose-600 dark:text-rose-300">{messageError}</p>}
             </div>
           </div>
