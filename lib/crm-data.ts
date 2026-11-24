@@ -67,6 +67,17 @@ export type SupportCase = {
   status: CaseStatus
   updated: string
   notes: string[]
+  /** 0 = not escalated, 1 = senior staff, 2 = manager. */
+  escalation?: EscalationLevel
+  escalationReason?: string | null
+  escalatedAt?: string | null
+  createdAt?: string
+}
+
+export type EscalationLevel = 0 | 1 | 2
+export const escalationLabels: Record<1 | 2, { short: string; long: string }> = {
+  1: { short: "Level 1", long: "Level 1 · Senior staff" },
+  2: { short: "Level 2", long: "Level 2 · Manager" },
 }
 
 export type Interaction = {
@@ -133,6 +144,9 @@ export type CrmMutation =
   | { action: "update-case-priority"; caseId: string; priority: Priority }
   | { action: "log-interaction"; contactId: string; type: InteractionType; summary: string; occurredAt: string; followUp: boolean }
   | { action: "update-case-status"; caseId: string; status: CaseStatus }
+  | { action: "update-case-title"; caseId: string; title: string }
+  | { action: "escalate-case"; caseId: string; level: EscalationLevel; reason?: string }
+  | { action: "delete-case"; caseId: string }
   | { action: "toggle-contact-tag"; contactId: string; tag: string }
   | { action: "update-profile"; name: string }
   | { action: "update-preferences"; preferences: CrmPreferences }
@@ -218,4 +232,11 @@ export function isChannel(value: unknown): value is Channel {
 /** Contacts created from Meta webhooks store last activity as ISO; manual contacts store free text. */
 export function formatLastSeen(value: string) {
   return parseTimestamp(value) ? `Last message ${formatDateTime(value)}` : value
+}
+
+/** Text written into a case's notes when its escalation changes, so the history stays on the case. */
+export function escalationNote(level: EscalationLevel, previous: EscalationLevel, reason?: string) {
+  const when = new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+  if (level === 0) return `De-escalated (was ${escalationLabels[previous as 1 | 2]?.long ?? "escalated"}) · ${when}${reason ? ` — ${reason}` : ""}`
+  return `${level > previous ? "Escalated" : "Lowered"} to ${escalationLabels[level].long} · ${when}${reason ? ` — ${reason}` : ""}`
 }

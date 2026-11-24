@@ -1,7 +1,7 @@
 import { demoCrmData } from "@/lib/crm-demo-data"
-import { colorForName, defaultCrmPreferences, initialsForName, type CaseStatus, type Contact, type Conversation, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase } from "@/lib/crm-data"
+import { colorForName, defaultCrmPreferences, initialsForName, type CaseStatus, type Contact, type Conversation, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase, escalationNote } from "@/lib/crm-data"
 
-const storageKey = "bintang.crm.mock.v1"
+const storageKey = "bintang.crm.mock.v2"
 
 function cloneDemoData(): CrmSnapshot {
   return JSON.parse(JSON.stringify(demoCrmData)) as CrmSnapshot
@@ -119,6 +119,30 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
     case "log-interaction": {
       const interaction: Interaction = { id: newId(), contactId: mutation.contactId, type: mutation.type, summary: mutation.summary, date: new Date(mutation.occurredAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), followUp: mutation.followUp }
       snapshot.interactions.unshift(interaction)
+      break
+    }
+    case "update-case-title": {
+      const item = snapshot.cases.find((candidate) => candidate.id === mutation.caseId)
+      if (!item) throw new Error("That case could not be found.")
+      item.title = mutation.title
+      item.updated = "Just now"
+      break
+    }
+    case "escalate-case": {
+      const item = snapshot.cases.find((candidate) => candidate.id === mutation.caseId)
+      if (!item) throw new Error("That case could not be found.")
+      const previous = item.escalation ?? 0
+      if (previous === mutation.level) break
+      item.escalation = mutation.level
+      item.escalationReason = mutation.level ? mutation.reason ?? null : null
+      item.escalatedAt = mutation.level ? new Date().toISOString() : null
+      if (mutation.level) item.priority = "High"
+      item.notes.push(escalationNote(mutation.level, previous, mutation.reason))
+      item.updated = "Just now"
+      break
+    }
+    case "delete-case": {
+      snapshot.cases = snapshot.cases.filter((candidate) => candidate.id !== mutation.caseId)
       break
     }
     case "update-case-status": {

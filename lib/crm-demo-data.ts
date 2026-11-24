@@ -54,7 +54,7 @@ export const demoCrmData: CrmSnapshot = {
     ] },
   ],
   cases: [
-    { id: "CS-2048", title: "Checkout session timing out", contactId: "c5", priority: "High", channel: "webchat", status: "Open", updated: "12m ago", notes: ["Customer reports timeout when submitting card details.", "Asked customer which browser and device they’re using."] },
+    { id: "CS-2048", title: "Checkout session timing out", contactId: "c5", priority: "High", channel: "webchat", status: "Open", updated: "12m ago", notes: ["Customer reports timeout when submitting card details.", "Asked customer which browser and device they’re using.", "Escalated to Level 1 · Senior staff — Payment failures blocking a paying customer."], escalation: 1, escalationReason: "Payment failures blocking a paying customer.", escalatedAt: new Date(Date.now() - 8 * 60 * 1000).toISOString() },
     { id: "CS-2047", title: "Order tracking hasn’t updated", contactId: "c2", priority: "Medium", channel: "email", status: "Open", updated: "28m ago", notes: ["Order #48291 shipped 3 days ago.", "Escalated to fulfillment team for carrier scan."] },
     { id: "CS-2046", title: "Workspace seat expansion", contactId: "c1", priority: "Medium", channel: "whatsapp", status: "In Progress", updated: "1h ago", notes: ["Preparing a custom quote for 15 additional seats."] },
     { id: "CS-2045", title: "Reschedule onboarding session", contactId: "c7", priority: "Low", channel: "email", status: "In Progress", updated: "2h ago", notes: ["Shared availability for Thursday and Friday."] },

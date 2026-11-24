@@ -3,12 +3,12 @@ import { createClient } from "@/lib/supabase/server"
 import { metaAppConfigured } from "@/lib/meta/config"
 import { ConnectionError, connectWhatsApp, disconnectConnection, loadConnection, sendMetaText } from "@/lib/meta/connections"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type ChannelConnection, type CrmMutation, type CrmPreferences, type CrmSnapshot, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
+import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type ChannelConnection, type CrmMutation, type CrmPreferences, type CrmSnapshot, type EscalationLevel, escalationNote, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
 
 type StoredMessage = { id?: string; external_id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string; status?: "sent" | "delivered" | "read" | "failed"; via?: string }
 
 const contactColumns = "id,name,initials,color,company,email,phone,primary_channel,handle,assigned,last_seen,tags,created_at"
-const caseColumns = "id,title,contact_id,status,priority,channel_source,notes,created_at,updated_at"
+const caseColumns = "id,title,contact_id,status,priority,channel_source,notes,created_at,updated_at,escalation_level,escalation_reason,escalated_at"
 const conversationColumns = "id,contact_id,channel,messages,unread_count,last_activity,connection_id"
 const connectionColumns = "id,provider,external_account_id,display_name,status,last_error,last_event_at,created_at"
 const interactionColumns = "id,contact_id,type,summary,occurred_at,follow_up"
@@ -86,6 +86,10 @@ function mapCase(row: Record<string, unknown>) {
     status: row.status as CaseStatus,
     updated: relativeTime(String(row.updated_at)) === "now" ? "Just now" : `${relativeTime(String(row.updated_at))} ago`,
     notes: Array.isArray(row.notes) ? row.notes as string[] : [],
+    escalation: (row.escalation_level === 1 || row.escalation_level === 2 ? row.escalation_level : 0) as EscalationLevel,
+    escalationReason: typeof row.escalation_reason === "string" ? row.escalation_reason : null,
+    escalatedAt: typeof row.escalated_at === "string" ? row.escalated_at : null,
+    createdAt: String(row.created_at),
   }
 }
 
@@ -273,6 +277,25 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     if (!contactId || !summary || !occurredAt || (type !== "Call" && type !== "Meeting" && type !== "Note") || !Number.isFinite(Date.parse(occurredAt)) || typeof value.followUp !== "boolean") throw new CrmServerError(400, "Interaction details are incomplete.")
     return { action: value.action, contactId, summary, occurredAt, type, followUp: value.followUp }
   }
+  if (value.action === "update-case-title") {
+    const caseId = boundedString(value.caseId, 80)
+    const title = boundedString(value.title, 160)
+    if (!caseId || !title) throw new CrmServerError(400, "Give the case a title up to 160 characters.")
+    return { action: value.action, caseId, title }
+  }
+  if (value.action === "escalate-case") {
+    const caseId = boundedString(value.caseId, 80)
+    const reason = optionalString(value.reason, 500)
+    const level = value.level
+    if (!caseId || (level !== 0 && level !== 1 && level !== 2) || reason === null) throw new CrmServerError(400, "Choose a valid escalation level.")
+    if (level > 0 && !reason) throw new CrmServerError(400, "Add a short reason for the escalation.")
+    return { action: value.action, caseId, level, ...(reason ? { reason } : {}) }
+  }
+  if (value.action === "delete-case") {
+    const caseId = boundedString(value.caseId, 80)
+    if (!caseId) throw new CrmServerError(400, "Invalid case.")
+    return { action: value.action, caseId }
+  }
   if (value.action === "update-case-status") {
     const caseId = boundedString(value.caseId, 80)
     const status = value.status
@@ -395,6 +418,31 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     if (error) throwDatabaseError(error)
   } else if (mutation.action === "update-case-status") {
     const { data, error } = await supabase.from("crm_cases").update({ status: mutation.status, updated_at: now }).eq("id", mutation.caseId).eq("owner_id", user.id).select("id").maybeSingle()
+    if (error) throwDatabaseError(error)
+    if (!data) throw new CrmServerError(404, "That case could not be found.")
+  } else if (mutation.action === "update-case-title") {
+    const { data, error } = await supabase.from("crm_cases").update({ title: mutation.title, updated_at: now }).eq("id", mutation.caseId).eq("owner_id", user.id).select("id").maybeSingle()
+    if (error) throwDatabaseError(error)
+    if (!data) throw new CrmServerError(404, "That case could not be found.")
+  } else if (mutation.action === "escalate-case") {
+    const { data: item, error: readError } = await supabase.from("crm_cases").select("id,notes,escalation_level,priority").eq("id", mutation.caseId).eq("owner_id", user.id).maybeSingle()
+    if (readError) throwDatabaseError(readError)
+    if (!item) throw new CrmServerError(404, "That case could not be found.")
+    const previous = (item.escalation_level === 1 || item.escalation_level === 2 ? item.escalation_level : 0) as EscalationLevel
+    if (previous === mutation.level) return
+    const notes = Array.isArray(item.notes) ? item.notes as string[] : []
+    const { error } = await supabase.from("crm_cases").update({
+      escalation_level: mutation.level,
+      escalation_reason: mutation.level ? mutation.reason ?? null : null,
+      escalated_at: mutation.level ? now : null,
+      // Escalated work is urgent by definition.
+      ...(mutation.level ? { priority: "High" } : {}),
+      notes: [...notes, escalationNote(mutation.level, previous, mutation.reason)],
+      updated_at: now,
+    }).eq("id", mutation.caseId).eq("owner_id", user.id)
+    if (error) throwDatabaseError(error)
+  } else if (mutation.action === "delete-case") {
+    const { data, error } = await supabase.from("crm_cases").delete().eq("id", mutation.caseId).eq("owner_id", user.id).select("id").maybeSingle()
     if (error) throwDatabaseError(error)
     if (!data) throw new CrmServerError(404, "That case could not be found.")
   } else if (mutation.action === "toggle-contact-tag") {

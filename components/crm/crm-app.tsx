@@ -7,12 +7,12 @@ import { CrmSidebar, MobileNavigation } from "./crm-sidebar"
 import { DashboardView } from "./dashboard-view"
 import { InboxView } from "./inbox-view"
 import { ContactsView, ContactDetailsDrawer } from "./contacts-view"
-import { CasesView } from "./cases-view"
+import { CaseDetailsDrawer, CasesView } from "./cases-view"
 import { SettingsView } from "./settings-view"
 import { InteractionDialog } from "./interaction-dialog"
 import { CaseDialog, ContactDialog, ConversationDialog } from "./crm-dialogs"
 import { createClient } from "@/lib/supabase/client"
-import { channelLabels, pageRoutes, routePages, type CaseStatus, type Channel, type ChannelConnection, type Contact, type ContactInput, type Conversation, type CrmPreferences, type InteractionType, type PageKey, type Priority } from "@/lib/crm-data"
+import { channelLabels, pageRoutes, routePages, type CaseStatus, type Channel, type ChannelConnection, type Contact, type ContactInput, type Conversation, type CrmPreferences, type EscalationLevel, type InteractionType, type PageKey, type Priority } from "@/lib/crm-data"
 import { useCrmWorkspace } from "@/lib/crm-workspace"
 import { AlertStack, NoticeToast, NotificationsMenu, useLiveAlerts, useUnreadTitle, type UnreadItem } from "./live-alerts"
 
@@ -51,6 +51,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   const unreadCount = data.conversations.filter((conversation) => conversation.unread > 0).length
   const openCaseCount = data.cases.filter((item) => item.status !== "Resolved").length
   const selectedContact = data.contacts.find((contact) => contact.id === selectedContactId) ?? null
+  const selectedCase = data.cases.find((item) => item.id === selectedCaseId) ?? null
   const inboxActive = activePage === "Omnichannel Inbox"
   const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | undefined>()
   const unreadMessages = data.conversations.reduce((sum, conversation) => sum + conversation.unread, 0)
@@ -141,9 +142,32 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     setNotice(`${contact.name} and their linked records were deleted.`)
   }
 
+  /** Creates a case and opens it straight away, on whatever page you're on. */
+  async function createAndOpenCase(input: { contactId: string; title: string; channel: Channel; priority: Priority; note?: string }) {
+    const before = new Set(data.cases.map((item) => item.id))
+    const next = await runMutation({ action: "create-case", ...input })
+    const created = next.cases.find((item) => !before.has(item.id))
+    if (created) setSelectedCaseId(created.id)
+    setNotice(created ? `${created.id} created.` : "Case created.")
+  }
+
   async function handleNewCase(input: { contactId: string; title: string; channel: Channel; priority: Priority; note?: string }) {
-    await runMutation({ action: "create-case", ...input })
-    setNotice("Case created and saved to your workspace.")
+    await createAndOpenCase(input)
+  }
+
+  function openCase(caseId: string) {
+    setSelectedCaseId(caseId)
+  }
+
+  async function handleEscalateCase(caseId: string, level: EscalationLevel, reason?: string) {
+    await runMutation({ action: "escalate-case", caseId, level, ...(reason ? { reason } : {}) })
+    setNotice(level === 0 ? `${caseId} de-escalated.` : `${caseId} escalated to ${level === 2 ? "Level 2 · Manager" : "Level 1 · Senior staff"}.`)
+  }
+
+  async function handleDeleteCase(caseId: string) {
+    await runMutation({ action: "delete-case", caseId })
+    setSelectedCaseId(null)
+    setNotice(`${caseId} deleted.`)
   }
 
   async function handleAddCaseNote(caseId: string, note: string) {
@@ -163,8 +187,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   async function handleCreateCase(conversation: Conversation) {
     const title = `Follow-up: ${conversation.preview.slice(0, 42)}${conversation.preview.length > 42 ? "…" : ""}`
     try {
-      await runMutation({ action: "create-case", contactId: conversation.contactId, channel: conversation.channel, title, priority: "Medium", note: `Created from a ${channelLabels[conversation.channel]} conversation.` })
-      setNotice("Case created and saved to your workspace.")
+      await createAndOpenCase({ contactId: conversation.contactId, channel: conversation.channel, title, priority: "Medium", note: `Created from a ${channelLabels[conversation.channel]} conversation.` })
     } catch (caught) {
       setNotice(readableError(caught))
     }
@@ -237,11 +260,11 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   function renderPage() {
     if (isLoading) return <div role="status" className="m-0 flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">Loading your workspace…</div>
     if (error) return <div role="alert" className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-rose-200 bg-white p-6 text-center dark:border-rose-400/20 dark:bg-slate-950"><p className="max-w-sm text-xs leading-relaxed text-rose-700 dark:text-rose-300">{readableError(error)}</p><button onClick={() => void refresh()} className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-semibold text-white dark:bg-white dark:text-slate-900">Try again</button></div>
-    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} />
+    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} onOpenCase={openCase} />
     if (activePage === "Contacts") return <ContactsView contacts={data.contacts} query={search} onOpenContact={(contact) => setSelectedContactId(contact.id)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} />
-    if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} interactions={data.interactions} query={search} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} onUpdateStatus={handleUpdateCaseStatus} onUpdatePriority={handleUpdateCasePriority} onAddNote={handleAddCaseNote} onNewCase={() => setCaseDialog({})} onLogInteraction={() => openInteraction()} />
+    if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} query={search} onSelectCase={openCase} onNewCase={() => setCaseDialog({})} onLogInteraction={() => openInteraction()} />
     if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} connections={data.connections} metaReady={data.integrations.metaReady} onConnectWhatsApp={handleConnectWhatsApp} onDisconnectChannel={handleDisconnectChannel} />
-    return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} viewerName={viewerName} mode={mode} onOpenInbox={() => router.push(forceMock ? `/demo${pageRoutes["Omnichannel Inbox"]}` : pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(forceMock ? `/demo${pageRoutes.Cases}` : pageRoutes.Cases)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} />
+    return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} viewerName={viewerName} mode={mode} onOpenInbox={() => router.push(forceMock ? `/demo${pageRoutes["Omnichannel Inbox"]}` : pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(forceMock ? `/demo${pageRoutes.Cases}` : pageRoutes.Cases)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} onOpenCase={openCase} />
   }
 
   return <div className="flex h-[100dvh] overflow-hidden bg-[#F5F6FA] font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -254,13 +277,23 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     <AlertStack alerts={live.alerts} onOpen={openFromAlert} onDismiss={live.dismiss} />
     <NoticeToast notice={notice} onDismiss={clearNotice} />
     <InteractionDialog key={interactionContactId ?? "all-contacts"} open={interactionOpen} contacts={data.contacts} defaultContactId={interactionContactId} onClose={() => setInteractionOpen(false)} onSave={handleSaveInteraction} />
-    <ContactDetailsDrawer key={selectedContact?.id ?? "no-contact"} contact={selectedContact} cases={data.cases} interactions={data.interactions} onClose={() => setSelectedContactId(null)} actions={selectedContact ? {
+    <ContactDetailsDrawer key={selectedContact?.id ?? "no-contact"} contact={selectedContact} cases={data.cases} interactions={data.interactions} onClose={() => setSelectedContactId(null)} onOpenCase={openCase} actions={selectedContact ? {
       onEdit: () => setContactDialog({ contact: selectedContact }),
       onDelete: () => handleDeleteContact(selectedContact),
       onNewCase: () => setCaseDialog({ contactId: selectedContact.id }),
       onLogInteraction: () => openInteraction(selectedContact.id),
       onStartConversation: () => setConversationDialog({ contactId: selectedContact.id }),
     } : undefined} />
+    {selectedCase && <CaseDetailsDrawer key={selectedCase.id} item={selectedCase} contact={data.contacts.find((contact) => contact.id === selectedCase.contactId)} interactions={data.interactions.filter((interaction) => interaction.contactId === selectedCase.contactId)} onClose={() => setSelectedCaseId(null)} actions={{
+      onUpdateStatus: (status) => void handleUpdateCaseStatus(selectedCase.id, status),
+      onUpdatePriority: (priority) => void handleUpdateCasePriority(selectedCase.id, priority),
+      onAddNote: (note) => handleAddCaseNote(selectedCase.id, note),
+      onUpdateTitle: async (title) => { await runMutation({ action: "update-case-title", caseId: selectedCase.id, title }) },
+      onEscalate: (level, reason) => handleEscalateCase(selectedCase.id, level, reason),
+      onDelete: () => handleDeleteCase(selectedCase.id),
+      onOpenContact: () => { setSelectedContactId(selectedCase.contactId); setSelectedCaseId(null) },
+      onViewBoard: activePage === "Cases" ? undefined : () => router.push(forceMock ? `/demo${pageRoutes.Cases}` : pageRoutes.Cases),
+    }} />}
     {contactDialog && <ContactDialog key={contactDialog.contact?.id ?? "new-contact"} contact={contactDialog.contact} onClose={() => setContactDialog(null)} onSave={handleSaveContact} />}
     {caseDialog && <CaseDialog contacts={data.contacts} defaultContactId={caseDialog.contactId} onClose={() => setCaseDialog(null)} onSave={handleNewCase} />}
     {conversationDialog && <ConversationDialog contacts={data.contacts} defaultContactId={conversationDialog.contactId} onClose={() => setConversationDialog(null)} onSave={handleStartConversation} />}
