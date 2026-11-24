@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
-import { Check, ChevronRight, Plus } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 import { CrmHeader } from "./crm-header"
 import { CrmSidebar, MobileNavigation } from "./crm-sidebar"
 import { DashboardView } from "./dashboard-view"
@@ -15,6 +15,7 @@ import { CaseDialog, ContactDialog, ConversationDialog } from "./crm-dialogs"
 import { createClient } from "@/lib/supabase/client"
 import { channelLabels, pageRoutes, routePages, type CaseStatus, type Channel, type ChannelConnection, type Contact, type ContactInput, type Conversation, type CrmPreferences, type InteractionType, type PageKey, type Priority } from "@/lib/crm-data"
 import { useCrmWorkspace } from "@/lib/crm-workspace"
+import { AlertStack, NoticeToast, NotificationsMenu, useLiveAlerts, useUnreadTitle, type UnreadItem } from "./live-alerts"
 
 const pageMeta: Record<PageKey, { title: string; description: string; eyebrow: string }> = {
   Dashboard: { title: "Dashboard", description: "A clear view of your customer relationships.", eyebrow: "Workspace overview" },
@@ -60,6 +61,46 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   const unreadCount = data.conversations.filter((conversation) => conversation.unread > 0).length
   const openCaseCount = data.cases.filter((item) => item.status !== "Resolved").length
   const selectedContact = data.contacts.find((contact) => contact.id === selectedContactId) ?? null
+  const inboxActive = activePage === "Omnichannel Inbox"
+  const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | undefined>()
+  const unreadMessages = data.conversations.reduce((sum, conversation) => sum + conversation.unread, 0)
+  const unreadItems: UnreadItem[] = data.conversations
+    .filter((conversation) => conversation.unread > 0)
+    .sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""))
+    .flatMap((conversation) => { const contact = data.contacts.find((item) => item.id === conversation.contactId); return contact ? [{ conversation, contact }] : [] })
+
+  const openFromAlert = useCallback((conversationId: string) => {
+    setActiveConversationId(conversationId)
+    setOpenRequest({ id: conversationId, nonce: Date.now() })
+    if (!inboxActive) router.push(forceMock ? `/demo${pageRoutes["Omnichannel Inbox"]}` : pageRoutes["Omnichannel Inbox"])
+  }, [forceMock, inboxActive, router])
+
+  const live = useLiveAlerts({
+    conversations: data.conversations,
+    contacts: data.contacts,
+    ready: !isLoading && !error,
+    enabled: data.preferences.notifications.replies,
+    // No alert for the chat you are already reading.
+    isViewing: (conversationId) => inboxActive && conversationId === activeConversationId && !document.hidden,
+    onOpen: openFromAlert,
+  })
+  useUnreadTitle(unreadMessages)
+
+  // A message that arrives in the chat you have open counts as read straight away.
+  const activeUnread = data.conversations.find((item) => item.id === activeConversationId)?.unread ?? 0
+  useEffect(() => {
+    if (!inboxActive || !activeConversationId || activeUnread === 0 || document.hidden) return
+    void runMutation({ action: "mark-conversation-read", conversationId: activeConversationId }).catch(() => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inboxActive, activeConversationId, activeUnread])
+
+  async function handleMarkAllRead() {
+    const pending = data.conversations.filter((item) => item.unread > 0)
+    for (const conversation of pending) await runMutation({ action: "mark-conversation-read", conversationId: conversation.id }).catch(() => undefined)
+    setNotice(pending.length === 1 ? "1 conversation marked as read." : `${pending.length} conversations marked as read.`)
+  }
+
+  const clearNotice = useCallback(() => setNotice(""), [])
 
   function openInteraction(contactId?: string) {
     setInteractionContactId(contactId)
@@ -204,28 +245,29 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   }
 
   function renderPage() {
-    if (isLoading) return <div role="status" className="flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">Loading your workspace…</div>
+    if (isLoading) return <div role="status" className="m-0 flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">Loading your workspace…</div>
     if (error) return <div role="alert" className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-rose-200 bg-white p-6 text-center dark:border-rose-400/20 dark:bg-slate-950"><p className="max-w-sm text-xs leading-relaxed text-rose-700 dark:text-rose-300">{readableError(error)}</p><button onClick={() => void refresh()} className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-semibold text-white dark:bg-white dark:text-slate-900">Try again</button></div>
-    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} />
+    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} />
     if (activePage === "Contacts") return <ContactsView contacts={data.contacts} query={search} onOpenContact={(contact) => setSelectedContactId(contact.id)} onAddContact={() => setContactDialog({ contact: null })} />
     if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} interactions={data.interactions} query={search} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} onUpdateStatus={handleUpdateCaseStatus} onUpdatePriority={handleUpdateCasePriority} onAddNote={handleAddCaseNote} onNewCase={() => setCaseDialog({})} />
     if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} connections={data.connections} metaReady={data.integrations.metaReady} onConnectWhatsApp={handleConnectWhatsApp} onDisconnectChannel={handleDisconnectChannel} />
     return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} viewerName={viewerName} mode={mode} onOpenInbox={() => router.push(pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(pageRoutes.Cases)} onAddContact={() => setContactDialog({ contact: null })} />
   }
 
-  return <div className="flex min-h-screen bg-[#F5F6FA] font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  return <div className={`flex bg-[#F5F6FA] font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100 ${inboxActive ? "h-[100dvh] overflow-hidden" : "min-h-screen"}`}>
     <CrmSidebar activePage={activePage} caseCount={openCaseCount} unreadCount={unreadCount} mockRoute={forceMock} collapsed={sidebarCollapsed} viewerName={viewerName} viewerRole={viewerRole} onToggleCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)} />
-    <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-      <CrmHeader search={search} onSearch={setSearch} darkMode={darkMode} databaseMode={mode} viewerName={viewerName} viewerEmail={viewerEmail} onToggleTheme={toggleTheme} onSignOut={handleSignOut} />
+    <div className={`flex min-w-0 flex-1 flex-col ${inboxActive ? "min-h-0" : "min-h-screen"}`}>
+      <CrmHeader search={search} onSearch={setSearch} darkMode={darkMode} databaseMode={mode} viewerName={viewerName} viewerEmail={viewerEmail} onToggleTheme={toggleTheme} onSignOut={handleSignOut} notifications={<NotificationsMenu items={unreadItems} soundOn={live.soundOn} onToggleSound={live.setSoundOn} desktopPermission={live.desktopPermission} onEnableDesktop={() => void live.enableDesktop()} onOpen={openFromAlert} onMarkAllRead={() => void handleMarkAllRead()} />} />
       <MobileNavigation activePage={activePage} mockRoute={forceMock} />
-      <main className="min-w-0 flex-1 px-3 pb-8 pt-5 sm:px-5 sm:pt-6 xl:px-7">
+      {inboxActive ? <main className="flex min-h-0 min-w-0 flex-1 flex-col">{isLoading || error ? <div className="p-4">{renderPage()}</div> : renderPage()}</main> : <main className="min-w-0 flex-1 px-3 pb-8 pt-5 sm:px-5 sm:pt-6 xl:px-7">
         <div className="mx-auto max-w-[1600px]">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-5"><div><div className="mb-1 flex items-center gap-1.5 text-[10.5px] font-semibold text-slate-400"><span>{meta.eyebrow}</span><ChevronRight className="size-3" /><span className="text-indigo-700 dark:text-indigo-400">{activePage === "Omnichannel Inbox" ? "Inbox" : activePage}</span></div><h1 className="text-[20px] font-semibold tracking-[-0.04em] text-slate-900 dark:text-white sm:text-[23px]">{meta.title}</h1><p className="mt-1 text-[12.5px] text-slate-500">{meta.description}</p></div><div className="flex items-center gap-2">{activePage !== "Settings" && activePage !== "Dashboard" && <span className="hidden items-center gap-1.5 text-[10.5px] text-slate-400 lg:flex"><span className="size-1.5 rounded-full bg-indigo-400" /> Synced just now</span>}{activePage !== "Settings" && <button onClick={() => openInteraction(activePage === "Omnichannel Inbox" ? data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId : undefined)} className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11.5px] font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:h-9 sm:px-3"><Plus className="size-3.5 text-indigo-600 dark:text-indigo-400" /><span className="hidden sm:inline">Log interaction</span><span className="sm:hidden">Log</span></button>}</div></div>
-          {notice && <div role="status" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11.5px] font-medium text-indigo-800 dark:border-indigo-400/20 dark:bg-indigo-400/10 dark:text-indigo-300"><span className="flex items-center gap-2"><Check className="size-3.5" />{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss notification" className="text-indigo-700/70 hover:text-indigo-900 dark:text-indigo-300"><span aria-hidden="true">×</span></button></div>}
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-5"><div><div className="mb-1 flex items-center gap-1.5 text-[10.5px] font-semibold text-slate-400"><span>{meta.eyebrow}</span><ChevronRight className="size-3" /><span className="text-indigo-700 dark:text-indigo-400">{activePage}</span></div><h1 className="text-[20px] font-semibold tracking-[-0.04em] text-slate-900 dark:text-white sm:text-[23px]">{meta.title}</h1><p className="mt-1 text-[12.5px] text-slate-500">{meta.description}</p></div><div className="flex items-center gap-2">{activePage !== "Settings" && <button onClick={() => openInteraction()} className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11.5px] font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:h-9 sm:px-3"><Plus className="size-3.5 text-indigo-600 dark:text-indigo-400" /><span className="hidden sm:inline">Log interaction</span><span className="sm:hidden">Log</span></button>}</div></div>
           {renderPage()}
         </div>
-      </main>
+      </main>}
     </div>
+    <AlertStack alerts={live.alerts} onOpen={openFromAlert} onDismiss={live.dismiss} />
+    <NoticeToast notice={notice} onDismiss={clearNotice} />
     <InteractionDialog key={interactionContactId ?? "all-contacts"} open={interactionOpen} contacts={data.contacts} defaultContactId={interactionContactId} onClose={() => setInteractionOpen(false)} onSave={handleSaveInteraction} />
     <ContactDetailsDrawer key={selectedContact?.id ?? "no-contact"} contact={selectedContact} cases={data.cases} interactions={data.interactions} onClose={() => setSelectedContactId(null)} actions={selectedContact ? {
       onEdit: () => setContactDialog({ contact: selectedContact }),
