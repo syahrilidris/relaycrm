@@ -120,7 +120,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     if (conversation && conversation.unread > 0) void runMutation({ action: "mark-conversation-read", conversationId }).catch(() => undefined)
   }
 
-  async function handleStartConversation(input: { contactId: string; channel: Channel; text: string }) {
+  async function handleStartConversation(input: { contactId: string; channel: Channel; text: string; subject?: string }) {
     const before = new Set(data.conversations.map((item) => item.id))
     const next = await runMutation({ action: "start-conversation", ...input })
     const created = next.conversations.find((item) => !before.has(item.id))
@@ -235,6 +235,11 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     setNotice("WhatsApp number connected. New messages will appear in your inbox.")
   }
 
+  async function handleConnectEmail() {
+    await runMutation({ action: "connect-email" })
+    setNotice("Email connected. Emails to support@bintangkids.com will land in your inbox.")
+  }
+
   async function handleDisconnectChannel(connection: ChannelConnection) {
     await runMutation({ action: "disconnect-channel", connectionId: connection.id })
     setNotice(`${connection.name} disconnected.`)
@@ -275,7 +280,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} onOpenCase={openCase} />
     if (activePage === "Contacts") return <ContactsView contacts={data.contacts} conversations={data.conversations} duplicateCount={duplicates.pairs.length} onReviewDuplicates={() => setDuplicatesOpen(true)} query={search} onOpenContact={(contact) => setSelectedContactId(contact.id)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} />
     if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} query={search} onSelectCase={openCase} onNewCase={() => setCaseDialog({})} onLogInteraction={() => openInteraction()} />
-    if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} connections={data.connections} metaReady={data.integrations.metaReady} onConnectWhatsApp={handleConnectWhatsApp} onDisconnectChannel={handleDisconnectChannel} />
+    if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} connections={data.connections} metaReady={data.integrations.metaReady} emailReady={Boolean(data.integrations.emailReady)} onConnectEmail={handleConnectEmail} onConnectWhatsApp={handleConnectWhatsApp} onDisconnectChannel={handleDisconnectChannel} />
     return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} viewerName={viewerName} mode={mode} onOpenInbox={() => router.push(forceMock ? `/demo${pageRoutes["Omnichannel Inbox"]}` : pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(forceMock ? `/demo${pageRoutes.Cases}` : pageRoutes.Cases)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} onOpenCase={openCase} />
   }
 

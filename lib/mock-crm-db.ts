@@ -180,6 +180,7 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
       snapshot.preferences = mutation.preferences
       break
     }
+    case "connect-email":
     case "connect-whatsapp":
     case "disconnect-channel":
       throw new Error("Channel connections are only available in your live workspace. Sign in to connect Meta.")

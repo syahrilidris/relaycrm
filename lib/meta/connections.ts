@@ -8,7 +8,7 @@ export type MetaProvider = "whatsapp" | "facebook" | "instagram"
 export type ConnectionRow = {
   id: string
   owner_id: string
-  provider: MetaProvider
+  provider: MetaProvider | "email"
   external_account_id: string
   display_name: string
   details: Record<string, unknown>

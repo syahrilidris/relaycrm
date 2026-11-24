@@ -3,9 +3,11 @@ import { createClient } from "@/lib/supabase/server"
 import { metaAppConfigured } from "@/lib/meta/config"
 import { ConnectionError, connectWhatsApp, disconnectConnection, loadConnection, sendMetaText } from "@/lib/meta/connections"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { EmailError, emailConfigured, getEmailConfig, replySubject, sendEmail } from "@/lib/email/resend"
+import { findEmailConnection, findOrCreateEmailContact, findOrCreateEmailConversation } from "@/lib/email/inbound"
 import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type ChannelConnection, type CrmMutation, type CrmPreferences, type CrmSnapshot, type EscalationLevel, escalationNote, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
 
-type StoredMessage = { id?: string; external_id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string; status?: "sent" | "delivered" | "read" | "failed"; via?: string }
+type StoredMessage = { id?: string; external_id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string; message_id?: string; status?: "sent" | "delivered" | "read" | "failed"; via?: string }
 
 const contactColumns = "id,name,initials,color,company,email,phone,primary_channel,handle,assigned,last_seen,tags,created_at"
 const caseColumns = "id,title,contact_id,status,priority,channel_source,notes,created_at,updated_at,escalation_level,escalation_reason,escalated_at"
@@ -187,7 +189,7 @@ export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Prom
     viewer: { id: user.id, name: displayNameForUser(user), email: user.email ?? "" },
     preferences: mapUserPreferences(user.user_metadata?.crm_preferences),
     connections: connections.filter((item) => item.status !== "disconnected"),
-    integrations: { metaReady: metaAppConfigured() },
+    integrations: { metaReady: metaAppConfigured(), emailReady: emailConfigured() },
   }
 }
 
@@ -227,8 +229,11 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     const contactId = boundedString(value.contactId, 80)
     const text = boundedString(value.text, 4000)
     if (!contactId || !text || !isChannel(value.channel)) throw new CrmServerError(400, "Choose a contact, channel and first message.")
-    return { action: value.action, contactId, channel: value.channel, text }
+    const subject = optionalString(value.subject, 200)
+    if (subject === null) throw new CrmServerError(400, "Subject is too long.")
+    return { action: value.action, contactId, channel: value.channel, text, ...(subject ? { subject } : {}) }
   }
+  if (value.action === "connect-email") return { action: value.action }
   if (value.action === "mark-conversation-read") {
     const conversationId = boundedString(value.conversationId, 80)
     if (!conversationId) throw new CrmServerError(400, "Invalid conversation.")
@@ -374,6 +379,17 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
       // Live Meta channel: deliver to the customer first, then record it.
       const connection = await withConnectionErrors(() => loadConnection(String(conversation.connection_id)))
       if (!connection || connection.owner_id !== user.id || connection.status === "disconnected") throw new CrmServerError(409, "This channel is disconnected. Reconnect it in Settings → Integrations to reply.")
+      if (connection.provider === "email") {
+        const history = Array.isArray(conversation.messages) ? conversation.messages as StoredMessage[] : []
+        const ids = history.map((item) => item.message_id).filter((item): item is string => Boolean(item))
+        const lastInbound = [...history].reverse().find((item) => item.sender === "contact" && item.message_id)
+        const subject = replySubject([...history].reverse().find((item) => item.subject)?.subject ?? "Bintang Kids")
+        const externalId = await withEmailErrors(() => sendEmail({ to: String(conversation.external_user_id), subject, text: mutation.text, inReplyTo: lastInbound?.message_id, references: ids }))
+        const message: StoredMessage = { id: crypto.randomUUID(), external_id: externalId, sender: "agent", text: mutation.text, subject, timestamp: now, type: "email", status: "sent", via: "resend" }
+        const { error } = await createAdminClient().rpc("crm_append_message", { p_conversation_id: conversation.id, p_message: message, p_unread_increment: 0, p_activity: now })
+        if (error) throwDatabaseError(error)
+        return
+      }
       const externalId = await withConnectionErrors(() => sendMetaText(connection, String(conversation.external_user_id), mutation.text))
       const message: StoredMessage = { id: crypto.randomUUID(), ...(externalId ? { external_id: externalId } : {}), sender: "agent", text: mutation.text, timestamp: now, type: "chat", status: "sent", via: "meta" }
       const { error } = await createAdminClient().rpc("crm_append_message", { p_conversation_id: conversation.id, p_message: message, p_unread_increment: 0, p_activity: now })
@@ -386,6 +402,28 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     if (error) throwDatabaseError(error)
   } else if (mutation.action === "start-conversation") {
     await requireContact(supabase, user, mutation.contactId)
+    if (mutation.channel === "email") {
+      const connection = await findEmailConnection()
+      if (connection && connection.owner_id === user.id) {
+        const { data: contact } = await supabase.from("crm_contacts").select("email").eq("id", mutation.contactId).eq("owner_id", user.id).single()
+        const to = String(contact?.email ?? "").trim().toLowerCase()
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new CrmServerError(400, "Add an email address to this contact before emailing them.")
+        const subject = mutation.subject || "Message from Bintang Kids"
+        const externalId = await withEmailErrors(() => sendEmail({ to, subject, text: mutation.text }))
+        const admin = createAdminClient()
+        const { data: identity } = await admin.from("crm_contact_identities").select("contact_id").eq("connection_id", connection.id).eq("external_user_id", to).maybeSingle()
+        let contactId = identity?.contact_id ? String(identity.contact_id) : mutation.contactId
+        if (!identity) {
+          const { error: identityError } = await admin.from("crm_contact_identities").insert({ owner_id: user.id, contact_id: contactId, connection_id: connection.id, external_user_id: to })
+          if (identityError) contactId = await findOrCreateEmailContact(connection, to, "", now)
+        }
+        const conversationId = await findOrCreateEmailConversation(connection, contactId, to, now)
+        const message: StoredMessage = { id: crypto.randomUUID(), external_id: externalId, sender: "agent", text: mutation.text, subject, timestamp: now, type: "email", status: "sent", via: "resend" }
+        const { error } = await admin.rpc("crm_append_message", { p_conversation_id: conversationId, p_message: message, p_unread_increment: 0, p_activity: now })
+        if (error) throwDatabaseError(error)
+        return
+      }
+    }
     const message: StoredMessage = { id: crypto.randomUUID(), sender: "agent", text: mutation.text, timestamp: now, type: mutation.channel === "email" ? "email" : "chat" }
     const { error } = await supabase.from("crm_conversations").insert({ owner_id: user.id, contact_id: mutation.contactId, channel: mutation.channel, messages: [message], unread_count: 0, last_activity: now })
     if (error) throwDatabaseError(error)
@@ -468,6 +506,15 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, full_name: mutation.name } })
     if (error) throwDatabaseError(error)
     return data.user ?? { ...user, user_metadata: { ...user.user_metadata, full_name: mutation.name } }
+  } else if (mutation.action === "connect-email") {
+    if (!emailConfigured()) throw new CrmServerError(503, "Email isn't configured on the server yet. Add RESEND_API_KEY and RESEND_WEBHOOK_SECRET in Vercel.")
+    const { address, fromName } = getEmailConfig()
+    const admin = createAdminClient()
+    const { data: existing } = await admin.from("crm_channel_connections").select("id,owner_id").eq("provider", "email").eq("external_account_id", address).maybeSingle()
+    if (existing && existing.owner_id !== user.id) throw new CrmServerError(409, `${address} is already connected to another workspace.`)
+    const row = { owner_id: user.id, provider: "email", external_account_id: address, display_name: `${fromName} Support`, details: {}, status: "active", last_error: null, updated_at: now }
+    const { error } = existing ? await admin.from("crm_channel_connections").update(row).eq("id", existing.id) : await admin.from("crm_channel_connections").insert(row)
+    if (error) throwDatabaseError(error)
   } else if (mutation.action === "connect-whatsapp") {
     await withConnectionErrors(() => connectWhatsApp(user.id, mutation))
   } else if (mutation.action === "disconnect-channel") {
@@ -476,6 +523,15 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, crm_preferences: mutation.preferences } })
     if (error) throwDatabaseError(error)
     return data.user ?? { ...user, user_metadata: { ...user.user_metadata, crm_preferences: mutation.preferences } }
+  }
+}
+
+async function withEmailErrors<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof EmailError) throw new CrmServerError(error.status, error.message)
+    throw error
   }
 }
 

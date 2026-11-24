@@ -20,13 +20,15 @@ type SettingsViewProps = {
   onSignOut: () => void
   connections: ChannelConnection[]
   metaReady: boolean
+  emailReady: boolean
+  onConnectEmail: () => Promise<void>
   onConnectWhatsApp: (input: { phoneNumberId: string; wabaId?: string; accessToken: string }) => Promise<void>
   onDisconnectChannel: (connection: ChannelConnection) => Promise<void>
 }
 
 const channelOrder: Channel[] = ["whatsapp", "email", "instagram", "facebook", "webchat"]
 
-export function SettingsView({ viewerName, viewerEmail, preferences, mode, darkMode, onToggleTheme, onSaveProfile, onUpdatePreferences, onSignOut, connections, metaReady, onConnectWhatsApp, onDisconnectChannel }: SettingsViewProps) {
+export function SettingsView({ viewerName, viewerEmail, preferences, mode, darkMode, onToggleTheme, onSaveProfile, onUpdatePreferences, onSignOut, connections, metaReady, emailReady, onConnectEmail, onConnectWhatsApp, onDisconnectChannel }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState("profile")
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileName, setProfileName] = useState(viewerName)
@@ -94,7 +96,7 @@ export function SettingsView({ viewerName, viewerEmail, preferences, mode, darkM
         <div className="flex items-center gap-3 px-5 py-4"><div className="flex size-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 text-sm font-bold text-slate-950">{initialsForName(viewerName)}</div><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-800 dark:text-slate-200">{viewerName}</p><p className="mt-0.5 truncate text-[11.5px] text-slate-500">{viewerEmail || "No email address"} · {mode === "live" ? "Workspace owner" : "Demo profile"}</p></div><button onClick={openProfileEditor} className="ml-auto shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10.5px] font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900">Edit profile</button></div>
       </section>
 
-      <IntegrationsPanel mode={mode} metaReady={metaReady} connections={connections} onConnectWhatsApp={onConnectWhatsApp} onDisconnect={onDisconnectChannel} />
+      <IntegrationsPanel mode={mode} metaReady={metaReady} emailReady={emailReady} onConnectEmail={onConnectEmail} connections={connections} onConnectWhatsApp={onConnectWhatsApp} onDisconnect={onDisconnectChannel} />
 
       <section id="appearance" className="scroll-mt-4 rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"><div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800"><h2 className="text-xs font-semibold text-slate-900 dark:text-white">Appearance</h2><p className="mt-1 text-[11.5px] text-slate-500">Choose a look that works for your team.</p></div><div className="flex items-center justify-between gap-4 px-5 py-4"><div className="flex items-center gap-2.5"><span className="flex size-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{darkMode ? <Moon className="size-4" /> : <Sun className="size-4" />}</span><div><p className="text-[11.5px] font-semibold text-slate-800 dark:text-slate-200">{darkMode ? "Dark mode" : "Light mode"}</p><p className="mt-0.5 text-[10.5px] text-slate-500">Switch the workspace appearance.</p></div></div><button onClick={onToggleTheme} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[10.5px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900">Switch to {darkMode ? "light" : "dark"}</button></div></section>
 

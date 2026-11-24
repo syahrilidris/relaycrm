@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type FormEvent } from "react"
-import { AlertTriangle, Check, CheckCircle2, Copy, ExternalLink, Loader2, Plug, Plus, Unplug, X } from "lucide-react"
+import { AlertTriangle, Check, CheckCircle2, Copy, ExternalLink, Loader2, Mail, Plug, Plus, Unplug, X } from "lucide-react"
 import type { ChannelConnection, MetaProvider } from "@/lib/crm-data"
 import { formatDateTime } from "@/lib/crm-data"
 import { ChannelIcon } from "./crm-primitives"
@@ -9,6 +9,8 @@ import { ChannelIcon } from "./crm-primitives"
 type IntegrationsPanelProps = {
   mode: "live" | "mock"
   metaReady: boolean
+  emailReady: boolean
+  onConnectEmail: () => Promise<void>
   connections: ChannelConnection[]
   onConnectWhatsApp: (input: { phoneNumberId: string; wabaId?: string; accessToken: string }) => Promise<void>
   onDisconnect: (connection: ChannelConnection) => Promise<void>
@@ -20,7 +22,7 @@ const providers: { id: MetaProvider; title: string; blurb: string; tint: string 
   { id: "instagram", title: "Instagram Direct", blurb: "DMs to professional accounts", tint: "from-fuchsia-500/15 to-orange-400/0 text-fuchsia-600 dark:text-fuchsia-300" },
 ]
 
-export function IntegrationsPanel({ mode, metaReady, connections, onConnectWhatsApp, onDisconnect }: IntegrationsPanelProps) {
+export function IntegrationsPanel({ mode, metaReady, emailReady, onConnectEmail, connections, onConnectWhatsApp, onDisconnect }: IntegrationsPanelProps) {
   const [origin, setOrigin] = useState("")
   const [copied, setCopied] = useState(false)
   const [banner, setBanner] = useState<{ tone: "ok" | "error"; text: string } | null>(null)
@@ -123,6 +125,8 @@ export function IntegrationsPanel({ mode, metaReady, connections, onConnectWhats
       <p className="text-[11px] text-slate-500">Messenger and Instagram connect together: choose your Facebook Pages in the Meta pop-up, and any Instagram professional account linked to those Pages is added too. <a className="font-medium text-indigo-600 hover:underline dark:text-indigo-300" href="/guide#connect">Setup guide</a> · <a className="inline-flex items-center gap-0.5 font-medium text-indigo-600 hover:underline dark:text-indigo-300" href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">Meta App Dashboard <ExternalLink className="size-3" /></a></p>
     </div>
 
+    <EmailChannel live={live} ready={emailReady} connection={connections.find((item) => item.provider === "email")} busy={busyId} onConnect={async () => { setBusyId("email"); try { await onConnectEmail(); setBanner({ tone: "ok", text: "Email connected." }) } catch (error) { setBanner({ tone: "error", text: error instanceof Error ? error.message : "Could not connect email." }) } finally { setBusyId("") } }} onDisconnect={disconnect} />
+
     {waFormOpen && <WhatsAppDialog onClose={() => setWaFormOpen(false)} onSave={async (input) => { await onConnectWhatsApp(input); setWaFormOpen(false); setBanner({ tone: "ok", text: "WhatsApp number connected." }) }} />}
   </section>
 }
@@ -160,5 +164,21 @@ function WhatsAppDialog({ onClose, onSave }: { onClose: () => void; onSave: (inp
       {error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:bg-rose-400/10 dark:text-rose-300">{error}</p>}
       <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">Cancel</button><button type="submit" disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">{saving && <Loader2 className="size-3.5 animate-spin" />}{saving ? "Verifying with Meta…" : "Connect number"}</button></div>
     </form>
+  </div>
+}
+
+function EmailChannel({ live, ready, connection, busy, onConnect, onDisconnect }: { live: boolean; ready: boolean; connection?: ChannelConnection; busy: string; onConnect: () => Promise<void>; onDisconnect: (connection: ChannelConnection) => Promise<void> }) {
+  const active = connection && connection.status === "active"
+  return <div className="border-t border-slate-100 px-5 py-5 dark:border-slate-800">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
+      <span className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/15 to-sky-500/0 text-sky-600 dark:text-sky-300"><Mail className="size-5" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold text-slate-900 dark:text-white">Email</p>
+        <p className="truncate text-[11px] text-slate-500">{connection ? <>{connection.externalAccountId} · {connection.lastEventAt ? `last email ${formatDateTime(connection.lastEventAt)}` : "waiting for first email"}</> : ready ? "Receive and reply to support@bintangkids.com from the inbox" : live ? "Server setup needed: add RESEND_API_KEY and RESEND_WEBHOOK_SECRET in Vercel" : "Live workspace only"}</p>
+      </div>
+      {connection
+        ? <div className="flex items-center gap-2"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${active ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-400/10 dark:text-rose-300"}`}>{active ? "Connected" : "Needs attention"}</span><button onClick={() => void onDisconnect(connection)} disabled={busy === connection.id} title="Disconnect" aria-label="Disconnect email" className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-400/10">{busy === connection.id ? <Loader2 className="size-3.5 animate-spin" /> : <Unplug className="size-3.5" />}</button></div>
+        : <button disabled={!live || !ready || busy === "email"} onClick={() => void onConnect()} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-slate-900">{busy === "email" ? <Loader2 className="size-3.5 animate-spin" /> : <Plug className="size-3.5" />} Connect support@bintangkids.com</button>}
+    </div>
   </div>
 }

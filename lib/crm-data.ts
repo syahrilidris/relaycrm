@@ -33,9 +33,11 @@ export type MessageStatus = "sent" | "delivered" | "read" | "failed"
 
 export type MetaProvider = "whatsapp" | "facebook" | "instagram"
 
+export type ConnectionProvider = MetaProvider | "email"
+
 export type ChannelConnection = {
   id: string
-  provider: MetaProvider
+  provider: ConnectionProvider
   externalAccountId: string
   name: string
   status: "active" | "error" | "disconnected"
@@ -119,7 +121,7 @@ export type CrmSnapshot = {
   viewer: CrmViewer
   preferences: CrmPreferences
   connections: ChannelConnection[]
-  integrations: { metaReady: boolean }
+  integrations: { metaReady: boolean; emailReady?: boolean }
 }
 
 export type ContactInput = {
@@ -134,7 +136,7 @@ export type ContactInput = {
 
 export type CrmMutation =
   | { action: "send-message"; conversationId: string; text: string }
-  | { action: "start-conversation"; contactId: string; channel: Channel; text: string }
+  | { action: "start-conversation"; contactId: string; channel: Channel; text: string; subject?: string }
   | { action: "mark-conversation-read"; conversationId: string }
   | { action: "create-contact"; contact: ContactInput }
   | { action: "update-contact"; contactId: string; contact: ContactInput }
@@ -151,6 +153,7 @@ export type CrmMutation =
   | { action: "toggle-contact-tag"; contactId: string; tag: string }
   | { action: "update-profile"; name: string }
   | { action: "update-preferences"; preferences: CrmPreferences }
+  | { action: "connect-email" }
   | { action: "connect-whatsapp"; phoneNumberId: string; wabaId?: string; accessToken: string }
   | { action: "disconnect-channel"; connectionId: string }
 

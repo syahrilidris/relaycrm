@@ -102,7 +102,7 @@ async function findOrCreateContact(connection: ConnectionRow, event: Extract<Inb
   if (identity) return identity.contact_id as string
 
   const profile = event.userName ? { name: event.userName, handle: null } : await lookupSenderProfile(connection, event.userId)
-  const fallback = { whatsapp: "WhatsApp", facebook: "Messenger", instagram: "Instagram" }[connection.provider]
+  const fallback = ({ whatsapp: "WhatsApp", facebook: "Messenger", instagram: "Instagram", email: "Email" } as const)[connection.provider]
   const name = (profile.name || event.userPhone || `${fallback} user ${event.userId.slice(-4)}`).slice(0, 120)
   const { data: contact, error: contactError } = await admin.from("crm_contacts").insert({
     owner_id: connection.owner_id,

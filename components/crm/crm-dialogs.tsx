@@ -131,12 +131,14 @@ export function CaseDialog({ contacts, defaultContactId, onClose, onSave }: { co
   </Modal>
 }
 
-export function ConversationDialog({ contacts, defaultContactId, onClose, onSave }: { contacts: Contact[]; defaultContactId?: string; onClose: () => void; onSave: (input: { contactId: string; channel: Channel; text: string }) => Promise<void> }) {
+export function ConversationDialog({ contacts, defaultContactId, onClose, onSave }: { contacts: Contact[]; defaultContactId?: string; onClose: () => void; onSave: (input: { contactId: string; channel: Channel; text: string; subject?: string }) => Promise<void> }) {
   const initialContact = contacts.find((item) => item.id === defaultContactId) ?? contacts[0]
   const [contactId, setContactId] = useState(initialContact?.id ?? "")
   const [channel, setChannel] = useState<Channel>(initialContact?.channel ?? "email")
   const [text, setText] = useState("")
+  const [subject, setSubject] = useState("")
   const { saving, error, setError, run } = useSaving()
+  const selected = contacts.find((item) => item.id === contactId)
 
   function chooseContact(id: string) {
     setContactId(id)
@@ -148,17 +150,19 @@ export function ConversationDialog({ contacts, defaultContactId, onClose, onSave
     event.preventDefault()
     if (!contactId) { setError("Add a contact first, then start a conversation with them."); return }
     if (!text.trim()) { setError("Write the first message."); return }
+    if (channel === "email" && !selected?.email) { setError("This contact has no email address. Add one on their profile first."); return }
     void run(async () => {
-      await onSave({ contactId, channel, text: text.trim() })
+      await onSave({ contactId, channel, text: text.trim(), ...(channel === "email" && subject.trim() ? { subject: subject.trim() } : {}) })
       onClose()
     }, "The conversation could not be started.")
   }
 
-  return <Modal titleId="conversation-dialog-title" title="New conversation" description="Log an outbound message to a contact. Customers on WhatsApp, Messenger or Instagram reach you first — their chats appear in the inbox automatically and replies there are delivered live." icon={<MessageSquarePlus className="size-4" />} onClose={onClose}>
+  return <Modal titleId="conversation-dialog-title" title="New conversation" description="Email goes out from support@bintangkids.com. Customers on WhatsApp, Messenger or Instagram reach you first — their chats appear in the inbox automatically and replies there are delivered live." icon={<MessageSquarePlus className="size-4" />} onClose={onClose}>
     <form onSubmit={submit} className="p-5">
       <div className="grid gap-3 sm:grid-cols-2">
         <SelectField label="Contact *" value={contactId} onChange={chooseContact}>{contacts.length === 0 && <option value="">No contacts yet</option>}{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.company ? ` · ${contact.company}` : ""}</option>)}</SelectField>
         <SelectField label="Channel" value={channel} onChange={(value) => setChannel(value as Channel)}>{channels.map((item) => <option key={item} value={item}>{channelLabels[item]}</option>)}</SelectField>
+        {channel === "email" && <label className="sm:col-span-2"><span className={labelClass}>Subject</span><input maxLength={200} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Message from Bintang Kids" className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[11.5px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300" />{selected?.email && <span className="mt-1 block text-[10.5px] text-slate-400">Sent from support@bintangkids.com to {selected.email}</span>}</label>}
         <label className="sm:col-span-2"><span className={labelClass}>First message *</span><textarea autoFocus rows={4} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300" /></label>
       </div>
       <FormFooter saving={saving} error={error} label="Start conversation" onClose={onClose} />
