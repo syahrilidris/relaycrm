@@ -164,7 +164,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     const drop = data.contacts.find((item) => item.id === duplicateId)
     await runMutation({ action: "merge-contacts", primaryId, duplicateId })
     setSelectedContactId(primaryId)
-    setNotice(keep && drop ? `${drop.name} merged into ${keep.name}.` : "Contacts merged.")
+    setNotice(!keep || !drop ? "Contacts merged." : keep.name === drop.name ? `Merged both ${keep.name} contacts into one.` : `${drop.name} merged into ${keep.name}.`)
   }
 
   function openCase(caseId: string) {
