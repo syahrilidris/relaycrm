@@ -1,7 +1,7 @@
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Clock3, Inbox, MessageCircle, TrendingUp, UsersRound } from "lucide-react"
+import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarClock, Clock3, Inbox, MessageCircle, TrendingUp, UsersRound } from "lucide-react"
 import type { Channel, Contact, Conversation, SupportCase } from "@/lib/crm-data"
 import { channelLabels } from "@/lib/crm-data"
-import { ChannelPill, ContactAvatar, PriorityPill } from "./crm-primitives"
+import { ChannelPill, ContactAvatar, PageToolbar, PriorityPill, toolbarButton, toolbarPrimary } from "./crm-primitives"
 
 const channelColors: Record<Channel, string> = {
   whatsapp: "bg-emerald-500",
@@ -43,8 +43,11 @@ function liveVolume(conversations: Conversation[]) {
   return days.map(({ date, count }) => ({ day: date.toLocaleDateString([], { weekday: "short" }), count }))
 }
 
-export function DashboardView({ contacts, conversations, cases, viewerName, mode, onOpenInbox, onOpenCases, onAddContact }: { contacts: Contact[]; conversations: Conversation[]; cases: SupportCase[]; viewerName: string; mode: "live" | "mock"; onOpenInbox: () => void; onOpenCases: () => void; onAddContact: () => void }) {
+export function DashboardView({ contacts, conversations, cases, viewerName, mode, onOpenInbox, onOpenCases, onAddContact, onLogInteraction }: { contacts: Contact[]; conversations: Conversation[]; cases: SupportCase[]; viewerName: string; mode: "live" | "mock"; onOpenInbox: () => void; onOpenCases: () => void; onAddContact: () => void; onLogInteraction: () => void }) {
   const firstName = viewerName.trim().split(/\s+/)[0] || "there"
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
+  const unreadConversations = conversations.filter((item) => item.unread > 0).length
   const liveDays = mode === "live" ? liveVolume(conversations) : []
   const maximumLiveVolume = Math.max(1, ...liveDays.map((item) => item.count))
   const openCases = cases.filter((item) => item.status !== "Resolved")
@@ -59,9 +62,13 @@ export function DashboardView({ contacts, conversations, cases, viewerName, mode
     { label: "Customer satisfaction", value: mode === "mock" ? "96.8%" : "—", detail: mode === "mock" ? "+2.4% from last month" : "No survey data", icon: TrendingUp, tone: "bg-amber-50 text-amber-600 dark:bg-amber-400/10 dark:text-amber-300" },
   ]
 
-  return <div className="mx-auto flex max-w-[1440px] flex-col gap-6">
+  return <div className="flex min-h-0 flex-1 flex-col">
+    <PageToolbar title={`${greeting}, ${firstName}`} subtitle={`${new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })} · ${unreadConversations ? `${unreadConversations} ${unreadConversations === 1 ? "conversation needs" : "conversations need"} a reply` : "Inbox is all caught up"} · ${openCases.length} open ${openCases.length === 1 ? "case" : "cases"}`}>
+      <button onClick={onLogInteraction} className={`${toolbarButton} hidden sm:flex`}><CalendarClock className="size-3.5 text-indigo-600 dark:text-indigo-400" />Log interaction</button>
+      <button onClick={onOpenInbox} className={toolbarPrimary}><MessageCircle className="size-3.5" />Go to inbox{unreadConversations > 0 && <span className="rounded-full bg-white/20 px-1.5 text-[10.5px] font-semibold">{unreadConversations}</span>}</button>
+    </PageToolbar>
+    <div className="min-h-0 flex-1 overflow-y-auto bg-[#F5F6FA] dark:bg-slate-900/40"><div className="flex flex-col gap-5 p-4 sm:p-6">
     {contacts.length === 0 && <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3.5 dark:border-indigo-400/20 dark:bg-indigo-400/10"><div><h2 className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">Your workspace is empty</h2><p className="mt-0.5 text-[11.5px] text-indigo-800/80 dark:text-indigo-300/80">Add your first contact, then open cases, log interactions and start conversations for them.</p></div><button onClick={onAddContact} className="rounded-lg bg-indigo-600 px-3 py-2 text-[11.5px] font-semibold text-white hover:bg-indigo-700">Add first contact</button></section>}
-    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[12.5px] font-medium text-indigo-700 dark:text-indigo-400">{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p><h1 className="mt-1 text-[24px] font-semibold tracking-[-0.04em] text-slate-900 dark:text-white sm:text-[28px]">Good morning, {firstName} <span aria-hidden="true">✦</span></h1><p className="mt-1 text-[12px] text-slate-500">Here&apos;s what&apos;s happening with your customers today.</p></div><button onClick={onOpenInbox} className="flex h-9 items-center gap-2 rounded-lg bg-slate-900 px-3.5 text-[12.5px] font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"><MessageCircle className="size-3.5" /> Go to inbox <ArrowRight className="size-3.5" /></button></div>
 
     <section aria-label="Performance overview" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">{stats.map(({ label, value, detail, icon: Icon, tone }) => <article key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,.025)] dark:border-slate-800 dark:bg-slate-950"><div className="flex items-center justify-between"><p className="text-[12.5px] font-medium text-slate-500">{label}</p><span className={`flex size-8 items-center justify-center rounded-lg ${tone}`}><Icon className="size-4" /></span></div><div className="mt-3 flex items-end justify-between gap-2"><span className="text-[25px] font-semibold tracking-[-0.04em] text-slate-900 dark:text-white">{value}</span><span className="flex items-center gap-0.5 pb-1 text-right text-[10.5px] font-medium text-indigo-700 dark:text-indigo-400">{mode === "mock" && <ArrowUpRight className="size-3" />}{detail}</span></div></article>)}</section>
 
@@ -78,5 +85,6 @@ export function DashboardView({ contacts, conversations, cases, viewerName, mode
       <article className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"><div className="flex items-center justify-between px-4 py-4 sm:px-5"><div><h2 className="text-xs font-semibold text-slate-900 dark:text-white">Recent conversations</h2><p className="mt-1 text-[11.5px] text-slate-500">The latest activity from your inbox</p></div><button onClick={onOpenInbox} className="flex items-center gap-1 text-[11.5px] font-semibold text-indigo-700 hover:text-indigo-800 dark:text-indigo-400">View inbox <ArrowRight className="size-3" /></button></div><div className="divide-y divide-slate-100 dark:divide-slate-900">{conversations.slice(0, 4).map((conversation) => { const person = contacts.find((item) => item.id === conversation.contactId); if (!person) return null; return <button onClick={onOpenInbox} key={conversation.id} className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-900/60 sm:px-5"><ContactAvatar contact={person} size="sm" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><span className="truncate text-[12.5px] font-semibold text-slate-800 dark:text-slate-200">{person.name}</span><span className="shrink-0 text-[10.5px] text-slate-400">{conversation.time} ago</span></div><p className="mt-0.5 truncate text-[11.5px] text-slate-500">{conversation.preview}</p></div><ChannelPill channel={conversation.channel} label={false} /></button>})}</div></article>
       <article className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"><div className="flex items-center justify-between px-4 py-4 sm:px-5"><div><h2 className="text-xs font-semibold text-slate-900 dark:text-white">Cases to follow up</h2><p className="mt-1 text-[11.5px] text-slate-500">Keep customer issues moving</p></div><button onClick={onOpenCases} className="flex items-center gap-1 text-[11.5px] font-semibold text-indigo-700 dark:text-indigo-400">All cases <ArrowRight className="size-3" /></button></div><div className="divide-y divide-slate-100 dark:divide-slate-900">{openCases.slice(0, 4).map((item) => { const person = contacts.find((contact) => contact.id === item.contactId); return <button onClick={onOpenCases} key={item.id} className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-900/60 sm:px-5"><div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800"><Inbox className="size-3.5" /></div><div className="min-w-0 flex-1"><p className="truncate text-[11.5px] font-semibold text-slate-800 dark:text-slate-200">{item.title}</p><p className="mt-0.5 truncate text-[10.5px] text-slate-500">{item.id} <span className="px-1 text-slate-300">·</span>{person?.name}</p></div><PriorityPill priority={item.priority} /></button>})}</div></article>
     </section>
+    </div></div>
   </div>
 }

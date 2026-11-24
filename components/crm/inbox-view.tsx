@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Filter, Headphones, Loader2, Mail, MessageSquareText, MoreHorizontal, PanelRightClose, PanelRightOpen, Paperclip, Phone, Plus, RotateCw, Search, Send, Sparkles, Tag, UserRound, Video, X } from "lucide-react"
 import type { CaseStatus, Channel, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
 import { channelLabels, formatClockTime, formatDateTime, formatLastSeen } from "@/lib/crm-data"
-import { ChannelIcon, ChannelPill, ContactAvatar, CaseStatusPill, PriorityPill } from "./crm-primitives"
+import { ChannelIcon, ChannelPill, ContactAvatar, CaseStatusPill, PriorityPill, SelectMenu, Switch, type SelectMenuOption } from "./crm-primitives"
 
 const channelOrder: Channel[] = ["whatsapp", "facebook", "instagram", "email", "webchat"]
 type ChannelFilter = "all" | Channel
@@ -246,38 +246,13 @@ function ChannelFilterMenu({ value, onChange, channels, counts, unreadOnly, onUn
   unreadOnly: boolean
   onUnreadOnly: (value: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const options: ChannelFilter[] = ["all", ...channels]
-  const filtered = value !== "all" || unreadOnly
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false) }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [open])
-  return <div className="relative shrink-0">
-    <button onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} aria-label={`Channel: ${value === "all" ? "All channels" : channelLabels[value]}`} className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium transition ${filtered ? "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-200" : "border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"}`}>
-      {value === "all" ? <Filter className="size-3.5" /> : <ChannelIcon channel={value} className="size-3.5" />}
-      <span className="max-w-[86px] truncate">{value === "all" ? "All" : channelLabels[value]}</span>
-      <ChevronDown className={`size-3.5 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
-    </button>
-    {open && <>
-      <button aria-hidden="true" tabIndex={-1} className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} />
-      <div role="listbox" aria-label="Filter by channel" className="absolute right-0 top-10 z-40 w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-        {options.map((option) => {
-          const selected = option === value
-          const count = counts[option] ?? { total: 0, unread: 0 }
-          return <button key={option} role="option" aria-selected={selected} onClick={() => { onChange(option); setOpen(false) }} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition ${selected ? "bg-indigo-50 font-semibold text-indigo-800 dark:bg-indigo-400/10 dark:text-indigo-200" : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"}`}>
-            <span className="flex size-6 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{option === "all" ? <Filter className="size-3.5" /> : <ChannelIcon channel={option} className="size-3.5" />}</span>
-            <span className="flex-1">{option === "all" ? "All channels" : channelLabels[option]}</span>
-            {count.unread > 0 && <span className="rounded-full bg-indigo-500 px-1.5 text-[10px] font-semibold leading-4 text-white">{count.unread}</span>}
-            <span className="w-5 text-right text-[11px] text-slate-400">{count.total}</span>
-          </button>
-        })}
-        <div className="mt-1 border-t border-slate-100 pt-1 dark:border-slate-800">
-          <button onClick={() => onUnreadOnly(!unreadOnly)} role="switch" aria-checked={unreadOnly} className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[12.5px] text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"><span>Unread only</span><span className={`relative h-4 w-7 rounded-full transition ${unreadOnly ? "bg-indigo-600" : "bg-slate-300 dark:bg-slate-700"}`}><span className={`absolute top-0.5 size-3 rounded-full bg-white transition-all ${unreadOnly ? "left-3.5" : "left-0.5"}`} /></span></button>
-        </div>
-      </div>
-    </>}
-  </div>
+  const options: SelectMenuOption<ChannelFilter>[] = (["all", ...channels] as ChannelFilter[]).map((option) => ({
+    value: option,
+    label: option === "all" ? "All channels" : channelLabels[option],
+    icon: option === "all" ? <Filter className="size-3.5" /> : <ChannelIcon channel={option} className="size-3.5" />,
+    count: counts[option]?.total ?? 0,
+    badge: counts[option]?.unread ?? 0,
+  }))
+  return <SelectMenu label="Filter by channel" value={value} onChange={onChange} options={options} highlight={value !== "all" || unreadOnly}
+    footer={<button onClick={() => onUnreadOnly(!unreadOnly)} role="switch" aria-checked={unreadOnly} className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[12.5px] text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"><span>Unread only</span><Switch on={unreadOnly} /></button>} />
 }
