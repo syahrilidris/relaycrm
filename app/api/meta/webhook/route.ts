@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
   const raw = await request.text()
   const { appSecret } = getMetaConfig()
   if (!verifyMetaSignature(raw, request.headers.get("x-hub-signature-256"), appSecret)) {
+    console.warn("[meta-webhook] rejected: invalid signature", { hasHeader: Boolean(request.headers.get("x-hub-signature-256")), hasSecret: Boolean(appSecret), bytes: raw.length })
     return new NextResponse("Invalid signature", { status: 401 })
   }
   let payload: unknown
@@ -31,7 +32,8 @@ export async function POST(request: NextRequest) {
   }
   try {
     const events = parseWebhook(payload as Record<string, unknown>)
-    if (events.length) await ingestEvents(events)
+    const result = events.length ? await ingestEvents(events) : { stored: 0, unmatched: [] as string[] }
+    console.info("[meta-webhook] processed", { object: (payload as { object?: unknown })?.object, events: events.length, stored: result.stored, unmatchedAccounts: result.unmatched })
     return NextResponse.json({ received: true })
   } catch (error) {
     console.error("[meta-webhook] processing failed", error)

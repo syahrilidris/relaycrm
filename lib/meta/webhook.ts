@@ -145,11 +145,15 @@ export async function ingestEvents(events: InboundEvent[]) {
   const admin = createAdminClient()
   const connections = new Map<string, ConnectionRow | null>()
   let stored = 0
+  const unmatched: string[] = []
   for (const event of events) {
     const key = `${event.provider}:${event.accountId}`
     if (!connections.has(key)) connections.set(key, await findConnection(event.provider, event.accountId))
     const connection = connections.get(key)
-    if (!connection) continue
+    if (!connection) {
+      if (!unmatched.includes(key)) unmatched.push(key)
+      continue
+    }
 
     if (event.kind === "status") {
       const { error } = await admin.rpc("crm_update_message_status", { p_connection_id: connection.id, p_external_id: event.messageId, p_status: event.status })
@@ -167,5 +171,5 @@ export async function ingestEvents(events: InboundEvent[]) {
   }
   const touched = [...connections.values()].filter((c): c is ConnectionRow => Boolean(c))
   if (touched.length) await admin.from("crm_channel_connections").update({ last_event_at: new Date().toISOString() }).in("id", touched.map((c) => c.id))
-  return stored
+  return { stored, unmatched }
 }
