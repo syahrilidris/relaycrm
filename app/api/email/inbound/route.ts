@@ -10,7 +10,20 @@ export async function POST(request: NextRequest) {
   const raw = await request.text()
   const { webhookSecret } = getEmailConfig()
   if (!verifyResendSignature(raw, request.headers, webhookSecret)) {
-    console.warn("[email-webhook] rejected: invalid signature", { hasSecret: Boolean(webhookSecret), hasHeaders: Boolean(request.headers.get("svix-signature")) })
+    const raw_secret = process.env.RESEND_WEBHOOK_SECRET ?? ""
+    const body = webhookSecret.startsWith("whsec_") ? webhookSecret.slice(6) : webhookSecret
+    console.warn("[email-webhook] rejected: invalid signature", {
+      hasSecret: Boolean(webhookSecret),
+      secretLength: webhookSecret.length,
+      rawSecretLength: raw_secret.length,
+      startsWithWhsec: webhookSecret.startsWith("whsec_"),
+      looksLikeApiKey: webhookSecret.startsWith("re_"),
+      base64Chars: /^[A-Za-z0-9+/=]+$/.test(body),
+      decodedKeyBytes: Buffer.from(body, "base64").length,
+      timestampAgeSeconds: Math.round(Date.now() / 1000 - Number(request.headers.get("svix-timestamp"))),
+      signatureVersions: (request.headers.get("svix-signature") ?? "").split(" ").map((part) => part.split(",")[0]),
+      bytes: raw.length,
+    })
     return new NextResponse("Invalid signature", { status: 401 })
   }
   let payload: Record<string, unknown>
