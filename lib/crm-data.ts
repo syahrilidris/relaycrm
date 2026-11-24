@@ -27,6 +27,49 @@ export type Message = {
   kind?: "chat" | "email" | "note" | "call"
   subject?: string
   status?: MessageStatus
+  attachments?: Attachment[]
+}
+
+export type AttachmentKind = "image" | "video" | "audio" | "file"
+
+export type Attachment = {
+  url: string
+  name: string
+  mime: string
+  size?: number
+  kind: AttachmentKind
+}
+
+export type QuickReply = { id: string; title: string; text: string }
+
+export const defaultQuickReplies: QuickReply[] = [
+  { id: "qr-hello", title: "Greeting", text: "Hi! Thank you for contacting Bintang Kids 😊 How can we help you today?" },
+  { id: "qr-hours", title: "Opening hours", text: "We're open Monday to Friday, 8:00 am – 6:00 pm, and Saturday 9:00 am – 1:00 pm." },
+  { id: "qr-location", title: "Location", text: "You can find us at Bintang Kids, Bandar Puteri Bangi. Would you like us to share a Google Maps pin?" },
+  { id: "qr-fees", title: "Fees enquiry", text: "Thanks for asking about our fees! May I know your child's age and which programme you're interested in, so I can send the right fee details?" },
+  { id: "qr-visit", title: "Book a visit", text: "We'd love to show you around! Which day and time suits you for a school visit?" },
+  { id: "qr-thanks", title: "Thank you", text: "Thank you! Let us know if there's anything else we can help with 🌟" },
+]
+
+export function attachmentKind(mime: string): AttachmentKind {
+  if (mime.startsWith("image/")) return "image"
+  if (mime.startsWith("video/")) return "video"
+  if (mime.startsWith("audio/")) return "audio"
+  return "file"
+}
+
+export function attachmentLabel(attachments: Attachment[] | undefined) {
+  const first = attachments?.[0]
+  if (!first) return ""
+  const label = { image: "📷 Photo", video: "🎬 Video", audio: "🎤 Audio", file: `📄 ${first.name}` }[first.kind]
+  return attachments.length > 1 ? `${label} +${attachments.length - 1}` : label
+}
+
+export function formatBytes(size?: number) {
+  if (!size) return ""
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 export type MessageStatus = "sent" | "delivered" | "read" | "failed"
@@ -122,6 +165,7 @@ export type CrmSnapshot = {
   preferences: CrmPreferences
   connections: ChannelConnection[]
   integrations: { metaReady: boolean; emailReady?: boolean }
+  quickReplies?: QuickReply[]
 }
 
 export type ContactInput = {
@@ -135,7 +179,7 @@ export type ContactInput = {
 }
 
 export type CrmMutation =
-  | { action: "send-message"; conversationId: string; text: string }
+  | { action: "send-message"; conversationId: string; text: string; attachments?: Attachment[] }
   | { action: "start-conversation"; contactId: string; channel: Channel; text: string; subject?: string }
   | { action: "mark-conversation-read"; conversationId: string }
   | { action: "create-contact"; contact: ContactInput }
@@ -154,6 +198,7 @@ export type CrmMutation =
   | { action: "update-profile"; name: string }
   | { action: "update-preferences"; preferences: CrmPreferences }
   | { action: "connect-email" }
+  | { action: "save-quick-replies"; replies: QuickReply[] }
   | { action: "connect-whatsapp"; phoneNumberId: string; wabaId?: string; accessToken: string }
   | { action: "disconnect-channel"; connectionId: string }
 

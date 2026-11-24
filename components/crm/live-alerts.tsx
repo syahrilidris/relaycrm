@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Bell, BellOff, BellRing, Check, MonitorSmartphone, Volume2, VolumeX, X } from "lucide-react"
 import type { Contact, Conversation } from "@/lib/crm-data"
-import { channelLabels } from "@/lib/crm-data"
+import { attachmentLabel, channelLabels } from "@/lib/crm-data"
 import { ChannelIcon, ContactAvatar } from "./crm-primitives"
 
 export type LiveAlert = {
@@ -102,7 +102,7 @@ export function useLiveAlerts({ conversations, contacts, ready, enabled, isViewi
       if (isViewingRef.current(conversation.id)) continue
       const person = contacts.find((item) => item.id === conversation.contactId)
       const message = latestCustomerMessage(conversation)
-      fresh.push({ key: `${conversation.id}:${latestId}`, conversationId: conversation.id, contact: person ?? { name: "New customer", initials: "?", color: "bg-slate-100 text-slate-600" }, channel: conversation.channel, text: message?.text ?? conversation.preview })
+      fresh.push({ key: `${conversation.id}:${latestId}`, conversationId: conversation.id, contact: person ?? { name: "New customer", initials: "?", color: "bg-slate-100 text-slate-600" }, channel: conversation.channel, text: message?.text || attachmentLabel(message?.attachments) || conversation.preview })
     }
     seen.current = next
     if (!fresh.length || !enabled) return

@@ -12,7 +12,7 @@ import { SettingsView } from "./settings-view"
 import { InteractionDialog } from "./interaction-dialog"
 import { CaseDialog, ContactDialog, ConversationDialog } from "./crm-dialogs"
 import { createClient } from "@/lib/supabase/client"
-import { channelLabels, pageRoutes, routePages, type CaseStatus, type Channel, type ChannelConnection, type Contact, type ContactInput, type Conversation, type CrmPreferences, type EscalationLevel, type InteractionType, type PageKey, type Priority } from "@/lib/crm-data"
+import { attachmentKind, defaultQuickReplies, type Attachment, type QuickReply, channelLabels, pageRoutes, routePages, type CaseStatus, type Channel, type ChannelConnection, type Contact, type ContactInput, type Conversation, type CrmPreferences, type EscalationLevel, type InteractionType, type PageKey, type Priority } from "@/lib/crm-data"
 import { useCrmWorkspace } from "@/lib/crm-workspace"
 import { DuplicatesDialog, MergeContactsDialog, useDuplicatePairs } from "./merge-contacts"
 import { AlertStack, NoticeToast, NotificationsMenu, useLiveAlerts, useUnreadTitle, type UnreadItem } from "./live-alerts"
@@ -109,9 +109,29 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     setDarkMode(nextTheme)
   }
 
-  async function handleSendMessage(conversationId: string, text: string) {
+  async function handleSendMessage(conversationId: string, text: string, attachments?: Attachment[]) {
     // The message bubble itself shows Sending… / ticks / Not sent, so no page banner here.
-    await runMutation({ action: "send-message", conversationId, text })
+    await runMutation({ action: "send-message", conversationId, text, ...(attachments?.length ? { attachments } : {}) })
+  }
+
+  async function handleSaveQuickReplies(replies: QuickReply[]) {
+    await runMutation({ action: "save-quick-replies", replies })
+  }
+
+  async function uploadAttachment(file: File): Promise<Attachment> {
+    const mime = file.type || "application/octet-stream"
+    if (mode !== "live") {
+      // Demo workspace: keep small files inline so the preview works without storage.
+      if (file.size > 3 * 1024 * 1024) throw new Error("Demo uploads are limited to 3 MB")
+      const url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("Couldn't read file")); reader.readAsDataURL(file) })
+      return { url, name: file.name, mime, size: file.size, kind: attachmentKind(mime) }
+    }
+    const response = await fetch("/api/crm/attachments", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: file.name, size: file.size, mime }) })
+    const signed = await response.json().catch(() => ({})) as { uploadUrl?: string; publicUrl?: string; error?: string }
+    if (!response.ok || !signed.uploadUrl || !signed.publicUrl) throw new Error(signed.error ?? "Upload failed")
+    const upload = await fetch(signed.uploadUrl, { method: "PUT", headers: { "content-type": mime, "x-upsert": "false" }, body: file })
+    if (!upload.ok) throw new Error("Upload failed")
+    return { url: signed.publicUrl, name: file.name, mime, size: file.size, kind: attachmentKind(mime) }
   }
 
   function handleSelectConversation(conversationId: string) {
@@ -277,7 +297,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   function renderPage() {
     if (isLoading) return <div role="status" className="m-0 flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">Loading your workspace…</div>
     if (error) return <div role="alert" className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-rose-200 bg-white p-6 text-center dark:border-rose-400/20 dark:bg-slate-950"><p className="max-w-sm text-xs leading-relaxed text-rose-700 dark:text-rose-300">{readableError(error)}</p><button onClick={() => void refresh()} className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-semibold text-white dark:bg-white dark:text-slate-900">Try again</button></div>
-    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} onOpenCase={openCase} />
+    if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} quickReplies={data.quickReplies ?? defaultQuickReplies} onSaveQuickReplies={handleSaveQuickReplies} uploadFile={uploadAttachment} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} onOpenCase={openCase} />
     if (activePage === "Contacts") return <ContactsView contacts={data.contacts} conversations={data.conversations} duplicateCount={duplicates.pairs.length} onReviewDuplicates={() => setDuplicatesOpen(true)} query={search} onOpenContact={(contact) => setSelectedContactId(contact.id)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} />
     if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} query={search} onSelectCase={openCase} onNewCase={() => setCaseDialog({})} onLogInteraction={() => openInteraction()} />
     if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} connections={data.connections} metaReady={data.integrations.metaReady} emailReady={Boolean(data.integrations.emailReady)} onConnectEmail={handleConnectEmail} onConnectWhatsApp={handleConnectWhatsApp} onDisconnectChannel={handleDisconnectChannel} />

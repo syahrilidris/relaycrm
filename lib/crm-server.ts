@@ -1,13 +1,14 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { metaAppConfigured } from "@/lib/meta/config"
-import { ConnectionError, connectWhatsApp, disconnectConnection, loadConnection, sendMetaText } from "@/lib/meta/connections"
+import { ConnectionError, connectWhatsApp, disconnectConnection, loadConnection, sendMetaMessage } from "@/lib/meta/connections"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isOwnAttachmentUrl } from "@/lib/attachments-server"
 import { EmailError, emailConfigured, getEmailConfig, replySubject, sendEmail } from "@/lib/email/resend"
 import { findEmailConnection, findOrCreateEmailContact, findOrCreateEmailConversation } from "@/lib/email/inbound"
-import { colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type ChannelConnection, type CrmMutation, type CrmPreferences, type CrmSnapshot, type EscalationLevel, escalationNote, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
+import { attachmentKind, attachmentLabel, defaultQuickReplies, type Attachment, type QuickReply, colorForName, defaultCrmPreferences, initialsForName, isChannel, isPriority, type CaseStatus, type ContactInput, type Channel, type ChannelConnection, type CrmMutation, type CrmPreferences, type CrmSnapshot, type EscalationLevel, escalationNote, type InteractionType, type Message, type Priority } from "@/lib/crm-data"
 
-type StoredMessage = { id?: string; external_id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string; message_id?: string; status?: "sent" | "delivered" | "read" | "failed"; via?: string }
+type StoredMessage = { id?: string; external_id?: string; sender: "contact" | "agent" | "system"; text: string; timestamp: string; type: "chat" | "email" | "note" | "call"; subject?: string; message_id?: string; attachments?: Attachment[]; status?: "sent" | "delivered" | "read" | "failed"; via?: string }
 
 const contactColumns = "id,name,initials,color,company,email,phone,primary_channel,handle,assigned,last_seen,tags,created_at"
 const caseColumns = "id,title,contact_id,status,priority,channel_source,notes,created_at,updated_at,escalation_level,escalation_reason,escalated_at"
@@ -56,6 +57,7 @@ function mapMessages(raw: unknown, conversationId: string): Message[] {
       time: typeof value.timestamp === "string" ? value.timestamp : "",
       kind: type,
       ...(typeof value.subject === "string" ? { subject: value.subject } : {}),
+      ...(Array.isArray(value.attachments) && value.attachments.length ? { attachments: value.attachments.filter((item) => item && typeof item.url === "string").map((item) => ({ url: item.url, name: String(item.name ?? "file"), mime: String(item.mime ?? ""), ...(typeof item.size === "number" ? { size: item.size } : {}), kind: item.kind ?? attachmentKind(String(item.mime ?? "")) })) } : {}),
       ...(value.status === "sent" || value.status === "delivered" || value.status === "read" || value.status === "failed" ? { status: value.status } : {}),
     }
   })
@@ -115,7 +117,7 @@ function mapConversation(row: Record<string, unknown>, connections: Map<string, 
     id: String(row.id),
     contactId: String(row.contact_id),
     channel: row.channel as Channel,
-    preview: messages.at(-1)?.text ?? "",
+    preview: messages.at(-1)?.text || attachmentLabel(messages.at(-1)?.attachments) || "",
     time: relativeTime(String(row.last_activity)),
     unread: Number(row.unread_count ?? 0),
     lastActivity: String(row.last_activity),
@@ -190,7 +192,26 @@ export async function getCrmSnapshot(supabase: SupabaseClient, user: User): Prom
     preferences: mapUserPreferences(user.user_metadata?.crm_preferences),
     connections: connections.filter((item) => item.status !== "disconnected"),
     integrations: { metaReady: metaAppConfigured(), emailReady: emailConfigured() },
+    quickReplies: mapQuickReplies(user.user_metadata?.crm_quick_replies),
   }
+}
+
+function mapQuickReplies(raw: unknown): QuickReply[] {
+  if (!Array.isArray(raw)) return defaultQuickReplies
+  return raw.filter((item): item is QuickReply => isRecord(item) && typeof item.id === "string" && typeof item.title === "string" && typeof item.text === "string")
+}
+
+function parseAttachments(raw: unknown): Attachment[] {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw) || raw.length > 10) throw new CrmServerError(400, "You can attach up to 10 files per message.")
+  return raw.map((item) => {
+    const value = isRecord(item) ? item : {}
+    const url = boundedString(value.url, 1000)
+    const name = boundedString(value.name, 200)
+    const mime = boundedString(value.mime, 120) || "application/octet-stream"
+    if (!url || !/^https:\/\//.test(url) || !name) throw new CrmServerError(400, "One of the attachments is invalid.")
+    return { url, name, mime, ...(typeof value.size === "number" ? { size: value.size } : {}), kind: attachmentKind(mime) }
+  })
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -234,6 +255,17 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     return { action: value.action, contactId, channel: value.channel, text, ...(subject ? { subject } : {}) }
   }
   if (value.action === "connect-email") return { action: value.action }
+  if (value.action === "save-quick-replies") {
+    if (!Array.isArray(value.replies) || value.replies.length > 50) throw new CrmServerError(400, "You can save up to 50 quick replies.")
+    const replies = value.replies.map((item) => {
+      const reply = isRecord(item) ? item : {}
+      const title = boundedString(reply.title, 60)
+      const text = boundedString(reply.text, 2000)
+      if (!title || !text) throw new CrmServerError(400, "Each quick reply needs a title and a message.")
+      return { id: boundedString(reply.id, 80) || crypto.randomUUID(), title, text }
+    })
+    return { action: value.action, replies }
+  }
   if (value.action === "mark-conversation-read") {
     const conversationId = boundedString(value.conversationId, 80)
     if (!conversationId) throw new CrmServerError(400, "Invalid conversation.")
@@ -263,9 +295,10 @@ export function parseCrmMutation(value: unknown): CrmMutation {
   }
   if (value.action === "send-message") {
     const conversationId = boundedString(value.conversationId, 80)
-    const text = boundedString(value.text, 4000)
-    if (!conversationId || !text) throw new CrmServerError(400, "Enter a message before sending.")
-    return { action: value.action, conversationId, text }
+    const text = typeof value.text === "string" ? value.text.trim().slice(0, 4000) : ""
+    const attachments = parseAttachments(value.attachments)
+    if (!conversationId || (!text && !attachments.length)) throw new CrmServerError(400, "Enter a message or attach a file before sending.")
+    return { action: value.action, conversationId, text, ...(attachments.length ? { attachments } : {}) }
   }
   if (value.action === "create-case") {
     const contactId = boundedString(value.contactId, 80)
@@ -373,6 +406,8 @@ async function requireContact(supabase: SupabaseClient, user: User, contactId: s
 export async function applyCrmMutation(supabase: SupabaseClient, user: User, mutation: CrmMutation): Promise<User | undefined> {
   const now = new Date().toISOString()
   if (mutation.action === "send-message") {
+    const attachments = mutation.attachments ?? []
+    if (attachments.some((item) => !isOwnAttachmentUrl(item.url, user.id))) throw new CrmServerError(400, "Attachments must be uploaded from this workspace.")
     const { data: conversation, error: conversationError } = await supabase.from("crm_conversations").select("id,channel,messages,connection_id,external_user_id").eq("id", mutation.conversationId).eq("owner_id", user.id).single()
     if (conversationError || !conversation) throw new CrmServerError(404, "That conversation could not be found.")
     if (conversation.connection_id && conversation.external_user_id) {
@@ -384,20 +419,20 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
         const ids = history.map((item) => item.message_id).filter((item): item is string => Boolean(item))
         const lastInbound = [...history].reverse().find((item) => item.sender === "contact" && item.message_id)
         const subject = replySubject([...history].reverse().find((item) => item.subject)?.subject ?? "Bintang Kids")
-        const externalId = await withEmailErrors(() => sendEmail({ to: String(conversation.external_user_id), subject, text: mutation.text, inReplyTo: lastInbound?.message_id, references: ids }))
-        const message: StoredMessage = { id: crypto.randomUUID(), external_id: externalId, sender: "agent", text: mutation.text, subject, timestamp: now, type: "email", status: "sent", via: "resend" }
+        const externalId = await withEmailErrors(() => sendEmail({ to: String(conversation.external_user_id), subject, text: mutation.text, inReplyTo: lastInbound?.message_id, references: ids, attachments }))
+        const message: StoredMessage = { id: crypto.randomUUID(), external_id: externalId, sender: "agent", text: mutation.text, subject, ...(attachments.length ? { attachments } : {}), timestamp: now, type: "email", status: "sent", via: "resend" }
         const { error } = await createAdminClient().rpc("crm_append_message", { p_conversation_id: conversation.id, p_message: message, p_unread_increment: 0, p_activity: now })
         if (error) throwDatabaseError(error)
         return
       }
-      const externalId = await withConnectionErrors(() => sendMetaText(connection, String(conversation.external_user_id), mutation.text))
-      const message: StoredMessage = { id: crypto.randomUUID(), ...(externalId ? { external_id: externalId } : {}), sender: "agent", text: mutation.text, timestamp: now, type: "chat", status: "sent", via: "meta" }
+      const externalId = await withConnectionErrors(() => sendMetaMessage(connection, String(conversation.external_user_id), mutation.text, attachments))
+      const message: StoredMessage = { id: crypto.randomUUID(), ...(externalId ? { external_id: externalId } : {}), sender: "agent", text: mutation.text, ...(attachments.length ? { attachments } : {}), timestamp: now, type: "chat", status: "sent", via: "meta" }
       const { error } = await createAdminClient().rpc("crm_append_message", { p_conversation_id: conversation.id, p_message: message, p_unread_increment: 0, p_activity: now })
       if (error) throwDatabaseError(error)
       return
     }
     const storedMessages = Array.isArray(conversation.messages) ? conversation.messages as StoredMessage[] : []
-    const message: StoredMessage = { id: crypto.randomUUID(), sender: "agent", text: mutation.text, timestamp: now, type: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: "Re: Customer support" } : {}) }
+    const message: StoredMessage = { id: crypto.randomUUID(), sender: "agent", text: mutation.text, ...(attachments.length ? { attachments } : {}), timestamp: now, type: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: "Re: Customer support" } : {}) }
     const { error } = await supabase.from("crm_conversations").update({ messages: [...storedMessages, message], last_activity: now, updated_at: now }).eq("id", mutation.conversationId).eq("owner_id", user.id)
     if (error) throwDatabaseError(error)
   } else if (mutation.action === "start-conversation") {
@@ -506,6 +541,10 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
     const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, full_name: mutation.name } })
     if (error) throwDatabaseError(error)
     return data.user ?? { ...user, user_metadata: { ...user.user_metadata, full_name: mutation.name } }
+  } else if (mutation.action === "save-quick-replies") {
+    const { data, error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, crm_quick_replies: mutation.replies } })
+    if (error) throwDatabaseError(error)
+    return data.user ?? { ...user, user_metadata: { ...user.user_metadata, crm_quick_replies: mutation.replies } }
   } else if (mutation.action === "connect-email") {
     if (!emailConfigured()) throw new CrmServerError(503, "Email isn't configured on the server yet. Add RESEND_API_KEY and RESEND_WEBHOOK_SECRET in Vercel.")
     const { address, fromName } = getEmailConfig()

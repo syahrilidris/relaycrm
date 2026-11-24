@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Filter, Headphones, Loader2, Mail, MessageSquareText, MoreHorizontal, PanelRightClose, PanelRightOpen, Paperclip, Phone, Plus, RotateCw, Search, Send, Sparkles, Tag, UserRound, Video, X } from "lucide-react"
-import type { CaseStatus, Channel, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
+import { ChatComposer, MessageAttachments } from "./chat-composer"
+import { ArrowDown, ArrowLeft, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Ellipsis, Filter, Headphones, Loader2, Mail, MessageSquareText, MoreHorizontal, PanelRightClose, PanelRightOpen, Phone, Plus, RotateCw, Search, Tag, UserRound, Video, X } from "lucide-react"
+import type { Attachment, QuickReply, CaseStatus, Channel, Contact, Conversation, Interaction, SupportCase } from "@/lib/crm-data"
 import { channelLabels, formatClockTime, formatDateTime, formatLastSeen } from "@/lib/crm-data"
 import { EscalationBadge } from "./cases-view"
 import { ChannelIcon, ChannelPill, ContactAvatar, CaseStatusPill, PriorityPill, SelectMenu, Switch, type SelectMenuOption } from "./crm-primitives"
@@ -21,7 +22,10 @@ type InboxViewProps = {
   inspectorOpen: boolean
   onToggleInspector: () => void
   onSelectConversation: (id: string) => void
-  onSendMessage: (conversationId: string, text: string) => Promise<void>
+  onSendMessage: (conversationId: string, text: string, attachments?: Attachment[]) => Promise<void>
+  quickReplies: QuickReply[]
+  onSaveQuickReplies: (replies: QuickReply[]) => Promise<void>
+  uploadFile: (file: File) => Promise<Attachment>
   onLogInteraction: () => void
   onCreateCase: (conversation: Conversation) => Promise<void>
   onToggleTag: (contactId: string, tag: string) => Promise<void>
@@ -34,11 +38,10 @@ type InboxViewProps = {
   liveSync?: boolean
 }
 
-export function InboxView({ conversations, contacts, cases, interactions, visibleChannels, activeConversationId, query, inspectorOpen, onToggleInspector, onSelectConversation, onSendMessage, onLogInteraction, onCreateCase, onToggleTag, onStartConversation, onOpenCase, agentName, agentEmail, openRequest, liveSync }: InboxViewProps) {
+export function InboxView({ conversations, contacts, cases, interactions, visibleChannels, activeConversationId, query, inspectorOpen, onToggleInspector, onSelectConversation, onSendMessage, onLogInteraction, onCreateCase, onToggleTag, onStartConversation, onOpenCase, agentName, agentEmail, openRequest, liveSync, quickReplies, onSaveQuickReplies, uploadFile }: InboxViewProps) {
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all")
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [localSearch, setLocalSearch] = useState("")
-  const [draft, setDraft] = useState("")
   const [messageError, setMessageError] = useState("")
   // Phones: the chat opens as its own full-screen page instead of stacking under the list.
   const [mobileChatOpen, setMobileChatOpen] = useState(false)
@@ -120,7 +123,7 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
 
   async function deliver(item: OutgoingMessage) {
     try {
-      await onSendMessage(item.conversationId, item.text)
+      await onSendMessage(item.conversationId, item.text, item.attachments)
       // The saved copy is now in the conversation, so drop the placeholder.
       setOutbox((current) => current.filter((entry) => entry.key !== item.key))
     } catch (error) {
@@ -129,13 +132,11 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
     }
   }
 
-  function send() {
-    const text = draft.trim()
+  function send(text: string, attachments: Attachment[]) {
     // One reply at a time per chat, so a slow network can't produce duplicates.
-    if (!text || !activeConversation || sendingHere) return
+    if ((!text && !attachments.length) || !activeConversation || sendingHere) return
     setMessageError("")
-    setDraft("")
-    const item: OutgoingMessage = { key: crypto.randomUUID(), conversationId: activeConversation.id, text, time: new Date().toISOString(), status: "sending" }
+    const item: OutgoingMessage = { key: crypto.randomUUID(), conversationId: activeConversation.id, text, attachments, time: new Date().toISOString(), status: "sending" }
     setOutbox((current) => [...current, item])
     void deliver(item)
   }
@@ -149,7 +150,6 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
 
   function discard(item: OutgoingMessage) {
     setOutbox((current) => current.filter((entry) => entry.key !== item.key))
-    if (!draft.trim()) setDraft(item.text)
   }
 
 
@@ -190,11 +190,11 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
               <div className="mx-auto flex max-w-[690px] flex-col gap-3">
                 {activeConversation.messages.map((message) => {
                   if (message.from === "system") return <div key={message.id} className="flex justify-center py-1"><span className="rounded-full bg-slate-100 px-3 py-1 text-[10.5px] text-slate-500 dark:bg-slate-900">{message.text}</span></div>
-                  if (message.kind === "email") return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`w-full max-w-[430px] rounded-xl border bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${message.from === "agent" ? "border-indigo-200 dark:border-indigo-400/20" : "border-slate-200"}`}><div className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2 dark:border-slate-800"><span className="flex size-6 items-center justify-center rounded-md bg-sky-50 text-sky-600 dark:bg-sky-400/10 dark:text-sky-300"><Mail className="size-3" /></span><div className="min-w-0 flex-1"><p className="truncate text-[11.5px] font-semibold text-slate-700 dark:text-slate-200">{message.subject}</p><p className="text-[10.5px] text-slate-400">{message.from === "contact" ? contact.email : agentEmail ? `${agentName} · ${agentEmail}` : agentName}</p></div><span className="text-[10.5px] text-slate-400">{formatClockTime(message.time)}</span></div><p className="whitespace-pre-line text-[12.5px] leading-[1.7] text-slate-600 dark:text-slate-300">{message.text}</p></div></div>
-                  return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] sm:max-w-[72%] ${message.from === "agent" ? "items-end" : "items-start"} flex flex-col`}><div className={`rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.65] ${message.from === "agent" ? "rounded-br-md bg-indigo-600 text-white shadow-sm shadow-indigo-800/10" : "rounded-bl-md border border-slate-200 bg-white text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"}`}>{message.text}</div><span className={`mt-1 flex items-center gap-1 text-[10.5px] text-slate-400 ${message.from === "agent" ? "flex-row-reverse" : ""}`}>{formatClockTime(message.time)}{message.from === "agent" && <DeliveryTick status={message.status} />}</span></div></div>
+                  if (message.kind === "email") return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`w-full max-w-[430px] rounded-xl border bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${message.from === "agent" ? "border-indigo-200 dark:border-indigo-400/20" : "border-slate-200"}`}><div className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2 dark:border-slate-800"><span className="flex size-6 items-center justify-center rounded-md bg-sky-50 text-sky-600 dark:bg-sky-400/10 dark:text-sky-300"><Mail className="size-3" /></span><div className="min-w-0 flex-1"><p className="truncate text-[11.5px] font-semibold text-slate-700 dark:text-slate-200">{message.subject}</p><p className="text-[10.5px] text-slate-400">{message.from === "contact" ? contact.email : agentEmail ? `${agentName} · ${agentEmail}` : agentName}</p></div><span className="text-[10.5px] text-slate-400">{formatClockTime(message.time)}</span></div>{message.text && <p className="whitespace-pre-line text-[12.5px] leading-[1.7] text-slate-600 dark:text-slate-300">{message.text}</p>}{message.attachments?.length ? <div className="mt-2.5"><MessageAttachments attachments={message.attachments} fromAgent={false} /></div> : null}</div></div>
+                  return <div key={message.id} className={`flex ${message.from === "agent" ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] sm:max-w-[72%] ${message.from === "agent" ? "items-end" : "items-start"} flex flex-col gap-1`}>{message.attachments?.length ? <MessageAttachments attachments={message.attachments} fromAgent={message.from === "agent"} /> : null}{message.text && <div className={`whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.65] ${message.from === "agent" ? "rounded-br-md bg-indigo-600 text-white shadow-sm shadow-indigo-800/10" : "rounded-bl-md border border-slate-200 bg-white text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"}`}>{message.text}</div>}<span className={`mt-1 flex items-center gap-1 text-[10.5px] text-slate-400 ${message.from === "agent" ? "flex-row-reverse" : ""}`}>{formatClockTime(message.time)}{message.from === "agent" && <DeliveryTick status={message.status} />}</span></div></div>
                 })}
                 {pendingHere.map((item) => <div key={item.key} className="flex justify-end"><div className="flex max-w-[82%] flex-col items-end sm:max-w-[72%]">
-                  <div className={`rounded-2xl rounded-br-md px-3.5 py-2.5 text-[12.5px] leading-[1.65] text-white ${item.status === "failed" ? "bg-rose-500/90" : "bg-indigo-600/70"}`}>{item.text}</div>
+                  {item.attachments.length > 0 && <div className="mb-1 opacity-70"><MessageAttachments attachments={item.attachments} fromAgent /></div>}{item.text && <div className={`whitespace-pre-wrap break-words rounded-2xl rounded-br-md px-3.5 py-2.5 text-[12.5px] leading-[1.65] text-white ${item.status === "failed" ? "bg-rose-500/90" : "bg-indigo-600/70"}`}>{item.text}</div>}
                   {item.status === "sending"
                     ? <span className="mt-1 flex items-center gap-1 text-[10.5px] text-slate-400" role="status"><Loader2 className="size-3 animate-spin" />Sending…</span>
                     : <span className="mt-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[10.5px]" role="alert"><span className="font-medium text-rose-600 dark:text-rose-300" title={item.error}>Not sent</span><button onClick={() => retry(item)} disabled={sendingHere} className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline disabled:opacity-50 dark:text-indigo-300"><RotateCw className="size-3" />Retry</button><button onClick={() => discard(item)} className="text-slate-500 hover:underline">Remove</button></span>}
@@ -204,10 +204,7 @@ export function InboxView({ conversations, contacts, cases, interactions, visibl
               </div>
             </div>
             <div className="shrink-0 border-t border-slate-100 bg-white p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-950 sm:px-5 sm:py-4">
-              <div className="mx-auto max-w-[690px] rounded-xl border border-slate-200 bg-white shadow-sm focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-900">
-                <textarea aria-label={`Reply to ${contact.name}`} placeholder={`Reply to ${contact.name}...`} rows={2} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send() } }} className="block w-full resize-none bg-transparent px-3.5 pt-3 text-[12.5px] text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200" />
-                <div className="flex items-center justify-between px-2.5 pb-2"><div className="flex items-center gap-0.5"><button aria-label="Attach file" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Paperclip className="size-3.5" /></button><button aria-label="Insert template" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><Sparkles className="size-3.5" /></button><span className="ml-1 hidden text-[10.5px] text-slate-400 sm:inline">{activeConversation.connectionId ? `Enter sends to the customer on ${channelLabels[activeConversation.channel]}` : "Enter to save · not linked to a live channel"}</span></div><button onClick={send} disabled={!draft.trim() || sendingHere} aria-busy={sendingHere} className="flex min-w-[84px] items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[11.5px] font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{sendingHere ? <><Loader2 className="size-3 animate-spin" /> Sending…</> : <><Send className="size-3" /> Send</>}</button></div>
-              </div>
+              <ChatComposer key={activeConversation.id} placeholder={`Reply to ${contact.name}…`} hint={activeConversation.connectionId ? `Enter sends on ${channelLabels[activeConversation.channel]}` : "Enter to save · not linked to a live channel"} busy={sendingHere} quickReplies={quickReplies} onSaveQuickReplies={onSaveQuickReplies} uploadFile={uploadFile} onSend={send} />
               {messageError && <p role="alert" className="mx-auto mt-2 max-w-[690px] text-[11.5px] text-rose-600 dark:text-rose-300">{messageError}</p>}
             </div>
           </div>
@@ -238,7 +235,7 @@ function DeliveryTick({ status }: { status?: "sent" | "delivered" | "read" | "fa
   return <CheckCheck className="size-3 text-indigo-400" aria-label="Saved" />
 }
 
-type OutgoingMessage = { key: string; conversationId: string; text: string; time: string; status: "sending" | "failed"; error?: string }
+type OutgoingMessage = { key: string; conversationId: string; text: string; attachments: Attachment[]; time: string; status: "sending" | "failed"; error?: string }
 
 function ChannelFilterMenu({ value, onChange, channels, counts, unreadOnly, onUnreadOnly }: {
   value: ChannelFilter

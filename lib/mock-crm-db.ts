@@ -1,5 +1,5 @@
 import { demoCrmData } from "@/lib/crm-demo-data"
-import { colorForName, defaultCrmPreferences, initialsForName, type CaseStatus, type Contact, type Conversation, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase, escalationNote } from "@/lib/crm-data"
+import { attachmentLabel, colorForName, defaultCrmPreferences, initialsForName, type CaseStatus, type Contact, type Conversation, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase, escalationNote } from "@/lib/crm-data"
 
 const storageKey = "bintang.crm.mock.v3"
 
@@ -60,9 +60,9 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
     case "send-message": {
       const conversation = snapshot.conversations.find((item) => item.id === mutation.conversationId)
       if (!conversation) throw new Error("That conversation could not be found.")
-      const message: Message = { id: newId(), from: "agent", text: mutation.text.trim(), time, kind: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: conversation.preview.startsWith("Re:") ? conversation.preview : `Re: ${conversation.preview}` } : {}) }
+      const message: Message = { id: newId(), from: "agent", text: mutation.text.trim(), ...(mutation.attachments?.length ? { attachments: mutation.attachments } : {}), time, kind: conversation.channel === "email" ? "email" : "chat", ...(conversation.channel === "email" ? { subject: conversation.preview.startsWith("Re:") ? conversation.preview : `Re: ${conversation.preview}` } : {}) }
       conversation.messages.push(message)
-      conversation.preview = message.text
+      conversation.preview = message.text || attachmentLabel(message.attachments)
       conversation.time = "now"
       conversation.lastActivity = now.toISOString()
       break
@@ -178,6 +178,10 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
     }
     case "update-preferences": {
       snapshot.preferences = mutation.preferences
+      break
+    }
+    case "save-quick-replies": {
+      snapshot.quickReplies = mutation.replies
       break
     }
     case "connect-email":

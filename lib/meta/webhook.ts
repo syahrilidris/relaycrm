@@ -1,11 +1,16 @@
 import { extractPhone } from "@/lib/crm-data"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { colorForName, initialsForName } from "@/lib/crm-data"
-import { lookupSenderProfile, type ConnectionRow, type MetaProvider } from "./connections"
+import { rehostAttachment } from "@/lib/attachments-server"
+import type { Attachment } from "@/lib/crm-data"
+import { connectionToken, lookupSenderProfile, type ConnectionRow, type MetaProvider } from "./connections"
+import { graph } from "./graph"
+
+type InboundMedia = { url?: string; mediaId?: string; mime?: string; name?: string }
 
 /** A normalised message event from any Meta channel. */
 export type InboundEvent =
-  | { kind: "message"; provider: MetaProvider; accountId: string; userId: string; userName?: string; userPhone?: string; messageId: string; text: string; timestamp: string; fromBusiness: boolean }
+  | { kind: "message"; provider: MetaProvider; accountId: string; userId: string; userName?: string; userPhone?: string; messageId: string; text: string; timestamp: string; fromBusiness: boolean; media?: InboundMedia[] }
   | { kind: "status"; provider: MetaProvider; accountId: string; messageId: string; status: "sent" | "delivered" | "read" | "failed" }
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -54,10 +59,12 @@ export function parseWebhook(payload: Json): InboundEvent[] {
       if (!accountId) continue
       const names = new Map<string, string>((value.contacts ?? []).map((c: Json) => [String(c.wa_id), String(c.profile?.name ?? "")]))
       for (const message of value.messages ?? []) {
-        const text = whatsappText(message)
-        if (!text) continue
+        const mediaPart = ["image", "video", "audio", "document", "sticker"].includes(message.type) ? message[message.type] : null
+        const media: InboundMedia[] = mediaPart?.id ? [{ mediaId: String(mediaPart.id), mime: mediaPart.mime_type, name: mediaPart.filename }] : []
+        const text = media.length ? (mediaPart?.caption ?? "") : whatsappText(message)
+        if (!text && !media.length) continue
         const userId = String(message.from)
-        events.push({ kind: "message", provider: "whatsapp", accountId, userId, userName: names.get(userId) || undefined, userPhone: `+${userId}`, messageId: String(message.id), text, timestamp: isoFromSeconds(message.timestamp), fromBusiness: false })
+        events.push({ kind: "message", provider: "whatsapp", accountId, userId, userName: names.get(userId) || undefined, userPhone: `+${userId}`, messageId: String(message.id), text, timestamp: isoFromSeconds(message.timestamp), fromBusiness: false, ...(media.length ? { media } : {}) })
       }
       for (const status of value.statuses ?? []) {
         if (["sent", "delivered", "read", "failed"].includes(status.status)) events.push({ kind: "status", provider: "whatsapp", accountId, messageId: String(status.id), status: status.status })
@@ -72,9 +79,11 @@ export function parseWebhook(payload: Json): InboundEvent[] {
       for (const item of entry.messaging ?? []) {
         if (item.message && !item.message.is_deleted) {
           const echo = Boolean(item.message.is_echo)
-          const text = messengerText(item.message)
-          if (!text) continue
-          events.push({ kind: "message", provider, accountId, userId: String(echo ? item.recipient?.id : item.sender?.id), messageId: String(item.message.mid), text, timestamp: isoFromSeconds(item.timestamp), fromBusiness: echo })
+          const files = (Array.isArray(item.message.attachments) ? item.message.attachments : []).filter((a: Json) => ["image", "video", "audio", "file"].includes(a?.type) && typeof a?.payload?.url === "string")
+          const media: InboundMedia[] = files.map((a: Json) => ({ url: String(a.payload.url), mime: { image: "image/jpeg", video: "video/mp4", audio: "audio/mpeg", file: "application/octet-stream" }[a.type as string] }))
+          const text = media.length ? (typeof item.message.text === "string" ? item.message.text : "") : messengerText(item.message)
+          if (!text && !media.length) continue
+          events.push({ kind: "message", provider, accountId, userId: String(echo ? item.recipient?.id : item.sender?.id), messageId: String(item.message.mid), text, timestamp: isoFromSeconds(item.timestamp), fromBusiness: echo, ...(media.length ? { media } : {}) })
         } else if (item.postback) {
           events.push({ kind: "message", provider, accountId, userId: String(item.sender?.id), messageId: String(item.postback.mid ?? `${item.sender?.id}-${item.timestamp}`), text: item.postback.title ?? "[Button]", timestamp: isoFromSeconds(item.timestamp), fromBusiness: false })
         } else if (item.read?.mid) {
@@ -142,6 +151,29 @@ async function findOrCreateConversation(connection: ConnectionRow, contactId: st
   return retry.id as string
 }
 
+async function storeInboundMedia(connection: ConnectionRow, media: InboundMedia[]) {
+  const stored: Attachment[] = []
+  for (const item of media.slice(0, 10)) {
+    let url = item.url
+    let token: string | undefined
+    if (item.mediaId) {
+      // WhatsApp gives a media id; resolve it to a short-lived URL that needs the token to download.
+      try {
+        token = await connectionToken(connection.id)
+        const info = await graph<{ url?: string; mime_type?: string }>(item.mediaId, { token })
+        url = info.url
+        item.mime = item.mime ?? info.mime_type
+      } catch {
+        url = undefined
+      }
+    }
+    if (!url) continue
+    const attachment = await rehostAttachment(connection.owner_id, url, { name: item.name, mime: item.mime, token })
+    if (attachment) stored.push(attachment)
+  }
+  return stored
+}
+
 export async function ingestEvents(events: InboundEvent[]) {
   const admin = createAdminClient()
   const connections = new Map<string, ConnectionRow | null>()
@@ -164,7 +196,9 @@ export async function ingestEvents(events: InboundEvent[]) {
 
     const contactId = await findOrCreateContact(connection, event)
     const conversationId = await findOrCreateConversation(connection, contactId, event.userId, event.timestamp)
-    const message = { id: crypto.randomUUID(), external_id: event.messageId, sender: event.fromBusiness ? "agent" : "contact", text: event.text.slice(0, 4000), timestamp: event.timestamp, type: "chat", ...(event.fromBusiness ? { status: "sent", via: "meta" } : {}) }
+    const attachments = event.media?.length ? await storeInboundMedia(connection, event.media) : []
+    const fallbackText = event.media?.length && !attachments.length ? "📎 Attachment (couldn't be downloaded)" : ""
+    const message = { id: crypto.randomUUID(), external_id: event.messageId, sender: event.fromBusiness ? "agent" : "contact", text: (event.text || fallbackText).slice(0, 4000), ...(attachments.length ? { attachments } : {}), timestamp: event.timestamp, type: "chat", ...(event.fromBusiness ? { status: "sent", via: "meta" } : {}) }
     const { data: appended, error } = await admin.rpc("crm_append_message", { p_conversation_id: conversationId, p_message: message, p_unread_increment: event.fromBusiness ? 0 : 1, p_activity: event.timestamp })
     if (error) throw error
     if (appended) stored++

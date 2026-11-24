@@ -138,24 +138,41 @@ export async function connectPagesFromUserToken(ownerId: string, userToken: stri
 
 /** Sends a text message on the connection's channel. Returns Meta's message id. */
 export async function sendMetaText(connection: ConnectionRow, recipientId: string, text: string) {
+  return sendMetaMessage(connection, recipientId, text, [])
+}
+
+type OutgoingAttachment = { url: string; name: string; mime: string; kind: "image" | "video" | "audio" | "file" }
+
+/** Sends text (if any) then each attachment. Returns the id of the last message Meta accepted. */
+export async function sendMetaMessage(connection: ConnectionRow, recipientId: string, text: string, attachments: OutgoingAttachment[]) {
   const token = await connectionToken(connection.id)
+  let lastId: string | null = null
   try {
     if (connection.provider === "whatsapp") {
-      const result = await graph<{ messages?: { id: string }[] }>(`${connection.external_account_id}/messages`, {
-        method: "POST",
-        token,
-        body: { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "text", text: { preview_url: true, body: text } },
-      })
-      return result.messages?.[0]?.id ?? null
+      const send = async (body: Record<string, unknown>) => {
+        const result = await graph<{ messages?: { id: string }[] }>(`${connection.external_account_id}/messages`, { method: "POST", token, body: { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...body } })
+        lastId = result.messages?.[0]?.id ?? lastId
+      }
+      if (text) await send({ type: "text", text: { preview_url: true, body: text } })
+      for (const item of attachments) {
+        const type = item.kind === "file" ? "document" : item.kind
+        await send({ type, [type]: { link: item.url, ...(type === "document" ? { filename: item.name } : {}) } })
+      }
+      return lastId
     }
     // Messenger and Instagram (via the linked Page) share the Send API.
     const pageId = String(connection.details.page_id ?? connection.external_account_id)
-    const result = await graph<{ message_id?: string }>(`${pageId}/messages`, {
-      method: "POST",
-      token,
-      body: { recipient: { id: recipientId }, messaging_type: "RESPONSE", message: { text } },
-    })
-    return result.message_id ?? null
+    const send = async (message: Record<string, unknown>) => {
+      const result = await graph<{ message_id?: string }>(`${pageId}/messages`, { method: "POST", token, body: { recipient: { id: recipientId }, messaging_type: "RESPONSE", message } })
+      lastId = result.message_id ?? lastId
+    }
+    if (text) await send({ text })
+    for (const item of attachments) {
+      // Instagram DMs accept images, video and audio only; other files go as a link.
+      if (connection.provider === "instagram" && item.kind === "file") await send({ text: `📄 ${item.name}\n${item.url}` })
+      else await send({ attachment: { type: item.kind, payload: { url: item.url, is_reusable: true } } })
+    }
+    return lastId
   } catch (error) {
     if (error instanceof MetaGraphError) {
       // 190 = invalid/expired token: flag the connection so Settings shows it needs reconnecting.

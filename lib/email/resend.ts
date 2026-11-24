@@ -63,20 +63,30 @@ async function resend<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
-export type ReceivedEmail = { id: string; from: unknown; to?: unknown; subject?: string; text?: string | null; html?: string | null; message_id?: string; headers?: Record<string, string> | null; created_at?: string; attachments?: { filename?: string }[] }
+export type ReceivedEmail = { id: string; from: unknown; to?: unknown; subject?: string; text?: string | null; html?: string | null; message_id?: string; headers?: Record<string, string> | null; created_at?: string; attachments?: { id?: string; filename?: string; content_type?: string; size?: number; download_url?: string }[] }
+
+/** Lists a received email's attachments with short-lived download links. */
+export async function fetchReceivedAttachments(emailId: string) {
+  try {
+    const result = await resend<{ data?: { id?: string; filename?: string; content_type?: string; size?: number; download_url?: string }[] }>(`/emails/receiving/${encodeURIComponent(emailId)}/attachments`)
+    return Array.isArray(result.data) ? result.data : []
+  } catch {
+    return []
+  }
+}
 
 export function fetchReceivedEmail(id: string) {
   return resend<ReceivedEmail>(`/emails/receiving/${encodeURIComponent(id)}`)
 }
 
-export async function sendEmail(input: { to: string; subject: string; text: string; inReplyTo?: string; references?: string[] }) {
+export async function sendEmail(input: { to: string; subject: string; text: string; inReplyTo?: string; references?: string[]; attachments?: { url: string; name: string }[] }) {
   const { address, fromName } = getEmailConfig()
   const headers: Record<string, string> = {}
   if (input.inReplyTo) headers["In-Reply-To"] = input.inReplyTo
   if (input.references?.length) headers["References"] = input.references.slice(-10).join(" ")
   const result = await resend<{ id: string }>("/emails", {
     method: "POST",
-    body: JSON.stringify({ from: `${fromName} <${address}>`, to: [input.to], subject: input.subject, text: input.text, reply_to: address, ...(Object.keys(headers).length ? { headers } : {}) }),
+    body: JSON.stringify({ from: `${fromName} <${address}>`, to: [input.to], subject: input.subject, text: input.text, reply_to: address, ...(Object.keys(headers).length ? { headers } : {}), ...(input.attachments?.length ? { attachments: input.attachments.map((item) => ({ filename: item.name, path: item.url })) } : {}) }),
   })
   return result.id
 }

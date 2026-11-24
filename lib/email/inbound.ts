@@ -1,6 +1,8 @@
 import { colorForName, initialsForName } from "@/lib/crm-data"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchReceivedEmail, getEmailConfig, htmlToText, parseAddress, stripQuotedReply } from "./resend"
+import { rehostAttachment } from "@/lib/attachments-server"
+import type { Attachment } from "@/lib/crm-data"
+import { fetchReceivedAttachments, fetchReceivedEmail, getEmailConfig, htmlToText, parseAddress, stripQuotedReply } from "./resend"
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 type EmailConnection = { id: string; owner_id: string; external_account_id: string }
@@ -65,15 +67,26 @@ async function storeReceived(emailId: string, meta: Json) {
   if (!sender.email || sender.email === address) return { stored: false, reason: "no external sender" }
   const timestamp = full.created_at ? new Date(full.created_at).toISOString() : new Date().toISOString()
   const body = full.text?.trim() ? full.text : full.html ? htmlToText(full.html) : ""
-  const attachments = (full.attachments ?? meta.attachments ?? []) as { filename?: string }[]
+  const listed = (full.attachments ?? meta.attachments ?? []) as { filename?: string }[]
+  const stored: Attachment[] = []
+  const missing: string[] = []
+  if (listed.length) {
+    const files = await fetchReceivedAttachments(emailId)
+    for (const file of files.slice(0, 10)) {
+      const attachment = file.download_url ? await rehostAttachment(connection.owner_id, file.download_url, { name: file.filename, mime: file.content_type }) : null
+      if (attachment) stored.push(attachment)
+      else missing.push(file.filename || "attachment")
+    }
+    if (!files.length) missing.push(...listed.map((item) => item.filename || "attachment"))
+  }
   let text = stripQuotedReply(body).slice(0, 8000)
-  if (attachments.length) text = `${text}${text ? "\n\n" : ""}📎 ${attachments.map((item) => item.filename || "attachment").join(", ")}`
-  if (!text) text = "(empty email)"
+  if (missing.length) text = `${text}${text ? "\n\n" : ""}📎 ${missing.join(", ")}`
+  if (!text && !stored.length) text = "(empty email)"
 
   const contactId = await findOrCreateEmailContact(connection, sender.email, sender.name, timestamp)
   const conversationId = await findOrCreateEmailConversation(connection, contactId, sender.email, timestamp)
   const messageId = full.message_id || meta.message_id || full.headers?.["message-id"] || ""
-  const message = { id: crypto.randomUUID(), external_id: emailId, ...(messageId ? { message_id: String(messageId) } : {}), sender: "contact", text, subject: String(full.subject ?? meta.subject ?? "(no subject)").slice(0, 300), timestamp, type: "email" }
+  const message = { id: crypto.randomUUID(), external_id: emailId, ...(messageId ? { message_id: String(messageId) } : {}), sender: "contact", text, ...(stored.length ? { attachments: stored } : {}), subject: String(full.subject ?? meta.subject ?? "(no subject)").slice(0, 300), timestamp, type: "email" }
   const admin = createAdminClient()
   const { data: appended, error } = await admin.rpc("crm_append_message", { p_conversation_id: conversationId, p_message: message, p_unread_increment: 1, p_activity: timestamp })
   if (error) throw error
