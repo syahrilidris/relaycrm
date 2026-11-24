@@ -147,6 +147,7 @@ export type CrmMutation =
   | { action: "update-case-title"; caseId: string; title: string }
   | { action: "escalate-case"; caseId: string; level: EscalationLevel; reason?: string }
   | { action: "delete-case"; caseId: string }
+  | { action: "merge-contacts"; primaryId: string; duplicateId: string }
   | { action: "toggle-contact-tag"; contactId: string; tag: string }
   | { action: "update-profile"; name: string }
   | { action: "update-preferences"; preferences: CrmPreferences }
@@ -239,4 +240,48 @@ export function escalationNote(level: EscalationLevel, previous: EscalationLevel
   const when = new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
   if (level === 0) return `De-escalated (was ${escalationLabels[previous as 1 | 2]?.long ?? "escalated"}) · ${when}${reason ? ` — ${reason}` : ""}`
   return `${level > previous ? "Escalated" : "Lowered"} to ${escalationLabels[level].long} · ${when}${reason ? ` — ${reason}` : ""}`
+}
+
+/** Last 9 digits of a phone number, so "+60 16-209 7957", "016 2097957" and "60162097957" all match. */
+export function phoneKey(value: string | null | undefined) {
+  const digits = (value ?? "").replace(/\D/g, "")
+  return digits.length >= 9 ? digits.slice(-9) : ""
+}
+
+function nameKey(value: string) {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+}
+
+/** Finds a phone number a customer typed in a message, e.g. "my number is 016-209 7957". */
+export function extractPhone(text: string) {
+  const match = text.match(/(?:\+?\d[\d\s-]{7,15}\d)/)
+  if (!match) return ""
+  const digits = match[0].replace(/\D/g, "")
+  if (digits.length < 9 || digits.length > 13) return ""
+  if (/^01\d/.test(digits)) return `+6${digits}` // Malaysian mobile written locally
+  if (/^601\d/.test(digits)) return `+${digits}`
+  return match[0].trim().startsWith("+") ? `+${digits}` : digits
+}
+
+export type DuplicatePair = { key: string; a: Contact; b: Contact; reason: string }
+
+/** Pairs of contacts that are probably the same person. Nothing is merged without the user confirming. */
+export function findDuplicatePairs(contacts: Contact[], dismissed: Set<string> = new Set()) {
+  const pairs: DuplicatePair[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < contacts.length; i++) {
+    for (let j = i + 1; j < contacts.length; j++) {
+      const a = contacts[i], b = contacts[j]
+      const key = [a.id, b.id].sort().join(":")
+      if (seen.has(key) || dismissed.has(key)) continue
+      let reason = ""
+      if (phoneKey(a.phone) && phoneKey(a.phone) === phoneKey(b.phone)) reason = "Same phone number"
+      else if (a.email && a.email.toLowerCase() === b.email.toLowerCase()) reason = "Same email"
+      else if (nameKey(a.name).length > 2 && nameKey(a.name) === nameKey(b.name)) reason = "Same name"
+      if (!reason) continue
+      seen.add(key)
+      pairs.push({ key, a, b, reason })
+    }
+  }
+  return pairs
 }

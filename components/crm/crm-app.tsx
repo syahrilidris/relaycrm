@@ -14,6 +14,7 @@ import { CaseDialog, ContactDialog, ConversationDialog } from "./crm-dialogs"
 import { createClient } from "@/lib/supabase/client"
 import { channelLabels, pageRoutes, routePages, type CaseStatus, type Channel, type ChannelConnection, type Contact, type ContactInput, type Conversation, type CrmPreferences, type EscalationLevel, type InteractionType, type PageKey, type Priority } from "@/lib/crm-data"
 import { useCrmWorkspace } from "@/lib/crm-workspace"
+import { DuplicatesDialog, MergeContactsDialog, useDuplicatePairs } from "./merge-contacts"
 import { AlertStack, NoticeToast, NotificationsMenu, useLiveAlerts, useUnreadTitle, type UnreadItem } from "./live-alerts"
 
 function readableError(error: unknown) {
@@ -52,6 +53,9 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
   const openCaseCount = data.cases.filter((item) => item.status !== "Resolved").length
   const selectedContact = data.contacts.find((contact) => contact.id === selectedContactId) ?? null
   const selectedCase = data.cases.find((item) => item.id === selectedCaseId) ?? null
+  const duplicates = useDuplicatePairs(data.contacts)
+  const [mergeDialog, setMergeDialog] = useState<{ firstId: string; secondId?: string } | null>(null)
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false)
   const inboxActive = activePage === "Omnichannel Inbox"
   const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | undefined>()
   const unreadMessages = data.conversations.reduce((sum, conversation) => sum + conversation.unread, 0)
@@ -153,6 +157,14 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
 
   async function handleNewCase(input: { contactId: string; title: string; channel: Channel; priority: Priority; note?: string }) {
     await createAndOpenCase(input)
+  }
+
+  async function handleMergeContacts(primaryId: string, duplicateId: string) {
+    const keep = data.contacts.find((item) => item.id === primaryId)
+    const drop = data.contacts.find((item) => item.id === duplicateId)
+    await runMutation({ action: "merge-contacts", primaryId, duplicateId })
+    setSelectedContactId(primaryId)
+    setNotice(keep && drop ? `${drop.name} merged into ${keep.name}.` : "Contacts merged.")
   }
 
   function openCase(caseId: string) {
@@ -261,7 +273,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     if (isLoading) return <div role="status" className="m-0 flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">Loading your workspace…</div>
     if (error) return <div role="alert" className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-rose-200 bg-white p-6 text-center dark:border-rose-400/20 dark:bg-slate-950"><p className="max-w-sm text-xs leading-relaxed text-rose-700 dark:text-rose-300">{readableError(error)}</p><button onClick={() => void refresh()} className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-semibold text-white dark:bg-white dark:text-slate-900">Try again</button></div>
     if (activePage === "Omnichannel Inbox") return <InboxView conversations={data.conversations} contacts={data.contacts} cases={data.cases} interactions={data.interactions} visibleChannels={data.preferences.channels} activeConversationId={activeConversationId} query={search} inspectorOpen={inspectorOpen} onToggleInspector={() => setInspectorOpen((current) => !current)} onSelectConversation={handleSelectConversation} onStartConversation={() => setConversationDialog({})} agentName={viewerName} agentEmail={viewerEmail} openRequest={openRequest} liveSync={mode === "live"} onSendMessage={handleSendMessage} onLogInteraction={() => openInteraction(data.conversations.find((item) => item.id === activeConversationId)?.contactId ?? data.conversations[0]?.contactId)} onCreateCase={handleCreateCase} onToggleTag={handleToggleTag} onOpenCase={openCase} />
-    if (activePage === "Contacts") return <ContactsView contacts={data.contacts} query={search} onOpenContact={(contact) => setSelectedContactId(contact.id)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} />
+    if (activePage === "Contacts") return <ContactsView contacts={data.contacts} conversations={data.conversations} duplicateCount={duplicates.pairs.length} onReviewDuplicates={() => setDuplicatesOpen(true)} query={search} onOpenContact={(contact) => setSelectedContactId(contact.id)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} />
     if (activePage === "Cases") return <CasesView cases={data.cases} contacts={data.contacts} query={search} onSelectCase={openCase} onNewCase={() => setCaseDialog({})} onLogInteraction={() => openInteraction()} />
     if (activePage === "Settings") return <SettingsView viewerName={viewerName} viewerEmail={viewerEmail} preferences={data.preferences} mode={mode} darkMode={darkMode} onToggleTheme={toggleTheme} onSaveProfile={handleSaveProfile} onUpdatePreferences={handleUpdatePreferences} onSignOut={handleSignOut} connections={data.connections} metaReady={data.integrations.metaReady} onConnectWhatsApp={handleConnectWhatsApp} onDisconnectChannel={handleDisconnectChannel} />
     return <DashboardView contacts={data.contacts} conversations={data.conversations} cases={data.cases} viewerName={viewerName} mode={mode} onOpenInbox={() => router.push(forceMock ? `/demo${pageRoutes["Omnichannel Inbox"]}` : pageRoutes["Omnichannel Inbox"])} onOpenCases={() => router.push(forceMock ? `/demo${pageRoutes.Cases}` : pageRoutes.Cases)} onAddContact={() => setContactDialog({ contact: null })} onLogInteraction={() => openInteraction()} onOpenCase={openCase} />
@@ -277,7 +289,7 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
     <AlertStack alerts={live.alerts} onOpen={openFromAlert} onDismiss={live.dismiss} />
     <NoticeToast notice={notice} onDismiss={clearNotice} />
     <InteractionDialog key={interactionContactId ?? "all-contacts"} open={interactionOpen} contacts={data.contacts} defaultContactId={interactionContactId} onClose={() => setInteractionOpen(false)} onSave={handleSaveInteraction} />
-    <ContactDetailsDrawer key={selectedContact?.id ?? "no-contact"} contact={selectedContact} cases={data.cases} interactions={data.interactions} onClose={() => setSelectedContactId(null)} onOpenCase={openCase} actions={selectedContact ? {
+    <ContactDetailsDrawer key={selectedContact?.id ?? "no-contact"} contact={selectedContact} cases={data.cases} interactions={data.interactions} conversations={data.conversations} duplicates={duplicates.pairs} onOpenConversation={(id) => { setSelectedContactId(null); openFromAlert(id) }} onMerge={(otherId) => selectedContact && setMergeDialog({ firstId: selectedContact.id, secondId: otherId })} onClose={() => setSelectedContactId(null)} onOpenCase={openCase} actions={selectedContact ? {
       onEdit: () => setContactDialog({ contact: selectedContact }),
       onDelete: () => handleDeleteContact(selectedContact),
       onNewCase: () => setCaseDialog({ contactId: selectedContact.id }),
@@ -294,6 +306,8 @@ function CrmWorkspace({ pathname, forceMock }: { pathname: string; forceMock: bo
       onOpenContact: () => { setSelectedContactId(selectedCase.contactId); setSelectedCaseId(null) },
       onViewBoard: activePage === "Cases" ? undefined : () => router.push(forceMock ? `/demo${pageRoutes.Cases}` : pageRoutes.Cases),
     }} />}
+    {duplicatesOpen && <DuplicatesDialog pairs={duplicates.pairs} conversations={data.conversations} onDismiss={duplicates.dismiss} onClose={() => setDuplicatesOpen(false)} onReview={(pair) => { setDuplicatesOpen(false); setMergeDialog({ firstId: pair.a.id, secondId: pair.b.id }) }} />}
+    {mergeDialog && <MergeContactsDialog key={`${mergeDialog.firstId}:${mergeDialog.secondId ?? ""}`} contacts={data.contacts} conversations={data.conversations} cases={data.cases} firstId={mergeDialog.firstId} secondId={mergeDialog.secondId} onClose={() => setMergeDialog(null)} onMerge={handleMergeContacts} />}
     {contactDialog && <ContactDialog key={contactDialog.contact?.id ?? "new-contact"} contact={contactDialog.contact} onClose={() => setContactDialog(null)} onSave={handleSaveContact} />}
     {caseDialog && <CaseDialog contacts={data.contacts} defaultContactId={caseDialog.contactId} onClose={() => setCaseDialog(null)} onSave={handleNewCase} />}
     {conversationDialog && <ConversationDialog contacts={data.contacts} defaultContactId={conversationDialog.contactId} onClose={() => setConversationDialog(null)} onSave={handleStartConversation} />}

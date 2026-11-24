@@ -291,6 +291,12 @@ export function parseCrmMutation(value: unknown): CrmMutation {
     if (level > 0 && !reason) throw new CrmServerError(400, "Add a short reason for the escalation.")
     return { action: value.action, caseId, level, ...(reason ? { reason } : {}) }
   }
+  if (value.action === "merge-contacts") {
+    const primaryId = boundedString(value.primaryId, 80)
+    const duplicateId = boundedString(value.duplicateId, 80)
+    if (!primaryId || !duplicateId || primaryId === duplicateId) throw new CrmServerError(400, "Choose two different contacts to merge.")
+    return { action: value.action, primaryId, duplicateId }
+  }
   if (value.action === "delete-case") {
     const caseId = boundedString(value.caseId, 80)
     if (!caseId) throw new CrmServerError(400, "Invalid case.")
@@ -441,6 +447,12 @@ export async function applyCrmMutation(supabase: SupabaseClient, user: User, mut
       updated_at: now,
     }).eq("id", mutation.caseId).eq("owner_id", user.id)
     if (error) throwDatabaseError(error)
+  } else if (mutation.action === "merge-contacts") {
+    const { error } = await supabase.rpc("crm_merge_contacts", { p_primary: mutation.primaryId, p_duplicate: mutation.duplicateId })
+    if (error) {
+      if (error.code === "P0002") throw new CrmServerError(404, "One of those contacts could not be found.")
+      throwDatabaseError(error)
+    }
   } else if (mutation.action === "delete-case") {
     const { data, error } = await supabase.from("crm_cases").delete().eq("id", mutation.caseId).eq("owner_id", user.id).select("id").maybeSingle()
     if (error) throwDatabaseError(error)

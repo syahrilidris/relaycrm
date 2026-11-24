@@ -17,8 +17,10 @@ export const demoCrmData: CrmSnapshot = {
     { id: "c6", name: "Natali Craig", initials: "NC", color: "bg-rose-100 text-rose-700", company: "Studio Forma", email: "natali@studioforma.design", phone: "+1 (917) 555-0129", channel: "whatsapp", handle: "+1 917 555 0129", assigned: "Jordan Lee", lastSeen: "Active 3h ago", tags: ["Design partner"] },
     { id: "c7", name: "Drew Cano", initials: "DC", color: "bg-indigo-100 text-indigo-700", company: "Mono Creative", email: "drew@mono.design", phone: "+1 (202) 555-0164", channel: "email", handle: "drewcano", assigned: "Maya Chen", lastSeen: "Active 2d ago", tags: ["Onboarding"] },
     { id: "c8", name: "Andi Lane", initials: "AL", color: "bg-orange-100 text-orange-700", company: "Cedar & Stone", email: "andi@cedarstone.com", phone: "+1 (503) 555-0105", channel: "facebook", handle: "Andi Lane", assigned: "Alex Morgan", lastSeen: "Active 4d ago", tags: ["Wholesale"] },
+    { id: "c9", name: "Olivia Rhye", initials: "OR", color: "bg-violet-100 text-violet-700", company: "", email: "", phone: "", channel: "instagram", handle: "@olivia.rhye", assigned: "", lastSeen: "Active 20m ago", tags: ["New lead"] },
   ],
   conversations: [
+    { id: "v9", contactId: "c9", channel: "instagram", preview: "Hi! Saw your post, do you have weekend classes?", time: "20m", unread: 1, messages: [{ id: "v9m1", from: "contact", text: "Hi! Saw your post, do you have weekend classes?", time: "3:40 PM" }] },
     { id: "v1", contactId: "c1", channel: "whatsapp", preview: "That sounds perfect, thank you!", time: "2m", unread: 2, messages: [
       { id: "m1", from: "system", kind: "note", text: "Olivia started this conversation via WhatsApp", time: "10:24 AM" },
       { id: "m2", from: "contact", text: "Hi! I had a question about upgrading our workspace plan.", time: "10:25 AM" },

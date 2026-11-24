@@ -1,7 +1,7 @@
 import { demoCrmData } from "@/lib/crm-demo-data"
 import { colorForName, defaultCrmPreferences, initialsForName, type CaseStatus, type Contact, type Conversation, type CrmMutation, type CrmSnapshot, type Interaction, type Message, type SupportCase, escalationNote } from "@/lib/crm-data"
 
-const storageKey = "bintang.crm.mock.v2"
+const storageKey = "bintang.crm.mock.v3"
 
 function cloneDemoData(): CrmSnapshot {
   return JSON.parse(JSON.stringify(demoCrmData)) as CrmSnapshot
@@ -139,6 +139,20 @@ export async function applyMockCrmMutation(mutation: CrmMutation): Promise<CrmSn
       if (mutation.level) item.priority = "High"
       item.notes.push(escalationNote(mutation.level, previous, mutation.reason))
       item.updated = "Just now"
+      break
+    }
+    case "merge-contacts": {
+      const primary = snapshot.contacts.find((item) => item.id === mutation.primaryId)
+      const duplicate = snapshot.contacts.find((item) => item.id === mutation.duplicateId)
+      if (!primary || !duplicate || primary === duplicate) throw new Error("One of those contacts could not be found.")
+      for (const item of [...snapshot.conversations, ...snapshot.cases, ...snapshot.interactions]) if (item.contactId === duplicate.id) item.contactId = primary.id
+      primary.company ||= duplicate.company
+      primary.email ||= duplicate.email
+      primary.phone ||= duplicate.phone
+      primary.handle ||= duplicate.handle
+      primary.assigned ||= duplicate.assigned
+      primary.tags = [...new Set([...primary.tags, ...duplicate.tags])]
+      snapshot.contacts = snapshot.contacts.filter((item) => item.id !== duplicate.id)
       break
     }
     case "delete-case": {

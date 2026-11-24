@@ -22,7 +22,7 @@ export function CrmHeader({ search, onSearch, darkMode, databaseMode, viewerName
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRole = databaseMode === "live" ? "Workspace owner" : "Demo profile"
   return (
-    <header className="flex h-[66px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/90 sm:px-6 xl:px-8">
+    <header className="relative z-30 flex h-[66px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/90 sm:px-6 xl:px-8">
       <div className="flex min-w-0 items-center gap-2 text-[12px] text-slate-500"><span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-[#0E1430] lg:hidden"><BintangStar className="size-[18px] text-[#F5B301]" /></span><span className="hidden truncate sm:inline">{databaseMode === "mock" ? "Demo workspace" : `${viewerName.split(" ")[0] || "My"}’s workspace`}</span><ChevronDown className="hidden size-3.5 sm:block" /><span className="hidden text-slate-300 dark:text-slate-700 sm:inline">/</span><span className="truncate font-medium text-slate-900 dark:text-slate-100">Customer workspace</span></div>
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <label className="flex h-9 w-[min(28vw,250px)] min-w-[130px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-slate-400 transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/10 dark:border-slate-800 dark:bg-slate-900 dark:focus-within:bg-slate-900 sm:min-w-[160px]">

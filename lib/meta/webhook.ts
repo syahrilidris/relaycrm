@@ -1,3 +1,4 @@
+import { extractPhone } from "@/lib/crm-data"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { colorForName, initialsForName } from "@/lib/crm-data"
 import { lookupSenderProfile, type ConnectionRow, type MetaProvider } from "./connections"
@@ -167,7 +168,12 @@ export async function ingestEvents(events: InboundEvent[]) {
     const { data: appended, error } = await admin.rpc("crm_append_message", { p_conversation_id: conversationId, p_message: message, p_unread_increment: event.fromBusiness ? 0 : 1, p_activity: event.timestamp })
     if (error) throw error
     if (appended) stored++
-    if (!event.fromBusiness) await admin.from("crm_contacts").update({ last_seen: event.timestamp, updated_at: new Date().toISOString() }).eq("id", contactId)
+    if (!event.fromBusiness) {
+      await admin.from("crm_contacts").update({ last_seen: event.timestamp, updated_at: new Date().toISOString() }).eq("id", contactId)
+      // "My number is 016-…" in Messenger/Instagram: keep it so the contact can be matched to their WhatsApp.
+      const typedPhone = event.provider === "whatsapp" ? "" : extractPhone(event.text)
+      if (typedPhone) await admin.from("crm_contacts").update({ phone: typedPhone }).eq("id", contactId).eq("phone", "")
+    }
   }
   const touched = [...connections.values()].filter((c): c is ConnectionRow => Boolean(c))
   if (touched.length) await admin.from("crm_channel_connections").update({ last_event_at: new Date().toISOString() }).in("id", touched.map((c) => c.id))
