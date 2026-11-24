@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { decryptToken, encryptToken } from "./crypto"
 import { graph, MetaGraphError } from "./graph"
+import { getMetaConfig } from "./config"
 
 export type MetaProvider = "whatsapp" | "facebook" | "instagram"
 
@@ -113,8 +114,15 @@ export async function connectPagesFromUserToken(ownerId: string, userToken: stri
   const summary = { pages: 0, instagram: 0, errors: [] as string[] }
   for (const page of pages) {
     try {
-      await graph(`${page.id}/subscribed_apps`, { method: "POST", token: page.access_token, query: { subscribed_fields: "messages,message_echoes,messaging_postbacks,message_deliveries,message_reads" } })
-      await upsertConnection({ ownerId, provider: "facebook", externalAccountId: page.id, displayName: page.name, details: { page_id: page.id }, accessToken: page.access_token })
+      const wanted = ["messages", "message_echoes", "messaging_postbacks", "message_deliveries", "message_reads"]
+      await graph(`${page.id}/subscribed_apps`, { method: "POST", token: page.access_token, body: { subscribed_fields: wanted } })
+      // Meta sometimes accepts the call without recording the fields: read them back so a silent failure is visible.
+      const { appId } = getMetaConfig()
+      const current = await graph<{ data?: { id?: string; subscribed_fields?: string[] }[] }>(`${page.id}/subscribed_apps`, { token: page.access_token })
+      const fields = current.data?.find((app) => String(app.id) === appId)?.subscribed_fields ?? []
+      const missing = wanted.filter((field) => !fields.includes(field))
+      if (missing.includes("messages")) summary.errors.push(`${page.name}: Meta did not enable message forwarding (missing ${missing.join(", ")}).`)
+      await upsertConnection({ ownerId, provider: "facebook", externalAccountId: page.id, displayName: page.name, details: { page_id: page.id, subscribed_fields: fields, webhook_subscribed: !missing.includes("messages") }, accessToken: page.access_token })
       summary.pages++
       if (page.instagram_business_account?.id) {
         const ig = page.instagram_business_account
