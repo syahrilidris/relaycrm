@@ -137,6 +137,6 @@
   window.BintangChat = { open: function () { toggle(true) } }
   document.addEventListener("visibilitychange", function () { if (!document.hidden && state.v) poll() })
 
-  function mount() { document.body.appendChild(host); if (state.v) poll() }
+  function mount() { document.body.appendChild(host); if (/[?&]chat=1\b/.test(location.search) || location.hash === "#chat") toggle(true); else if (state.v) poll() }
   if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount)
 })()
